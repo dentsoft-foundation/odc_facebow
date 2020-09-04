@@ -3,6 +3,25 @@ import pickle
 import bpy
 from bpy_extras.io_utils import ImportHelper
 
+import pip
+
+def pymod_install(package):
+    if hasattr(pip, 'main'):
+        pip.main(['install', package])
+    else:
+        pip._internal.main(['install', package])
+
+try:
+    import cv2
+    from cv2 import aruco
+    print(cv2.__version__)
+except ModuleNotFoundError as e:
+    print("OpenCV not present, attempting install via pip.")
+    pymod_install('opencv-contrib-python')
+    import cv2
+    from cv2 import aruco
+
+
 bl_info = {
     "name": "Open Dental CAD Digital Facebow",
     "author": "Patrick R. Moore, Ilya Fomenko, Georgi Talmazov",
