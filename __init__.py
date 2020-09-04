@@ -1,4 +1,5 @@
 import os
+import pickle
 import bpy
 from bpy_extras.io_utils import ImportHelper
 
@@ -18,7 +19,7 @@ class calibrate(bpy.types.Operator, ImportHelper):
     bl_idname = "facebow.calibrate"
     bl_label = "Select File"
 
-    filter_glob: bpy.props.StringProperty(default='*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.bmp', options={'HIDDEN'})
+    filter_glob: bpy.props.StringProperty(default='*.*', options={'HIDDEN'})
 
     def execute(self, context):
         """Do something with the selected file(s)."""
@@ -26,13 +27,17 @@ class calibrate(bpy.types.Operator, ImportHelper):
         print('Selected file:', self.filepath)
         print('File name:', filename)
         print('File extension:', extension)
+        infile = open(self.filepath,'rb')
+        try: calibration_data = pickle.load(infile)
+        except: print("Not a python pickled file.")
+        infile.close()
         return {'FINISHED'}
 
 class captured_patient_data(bpy.types.Operator, ImportHelper):
     bl_idname = "facebow.input"
     bl_label = "Select Record"
 
-    filter_glob: bpy.props.StringProperty(default='*.jpg;*.jpeg;*.png;*.tif;*.tiff;*.bmp', options={'HIDDEN'})
+    filter_glob: bpy.props.StringProperty(default='*.mp4;*.jpeg;*.png;*.tif;*.tiff;*.bmp', options={'HIDDEN'})
 
     def execute(self, context):
         """Do something with the selected file(s)."""
