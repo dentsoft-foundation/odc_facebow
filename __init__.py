@@ -1,5 +1,6 @@
 import os
 import pickle
+import numpy as np
 import bpy
 from bpy_extras.io_utils import ImportHelper
 
@@ -34,6 +35,23 @@ bl_info = {
     "category": "Dental",
     }
 
+class generate_calibration_board(bpy.types.Operator):
+    bl_idname = "facebow.generate_aruco_board"
+    bl_label = "Generate Calibration Board"
+
+    def execute(self, context):
+        aruco_dict = aruco.getPredefinedDictionary( aruco.DICT_6X6_1000 )
+        markerLength = 3.75  # Here, measurement unit is centimetre.
+        markerSeparation = 0.5   # Here, measurement unit is centimetre.
+        board = aruco.GridBoard_create(4, 5, markerLength, markerSeparation, aruco_dict)
+        print("generated calibration board")
+        img = board.draw((864,1080))
+        cv2.imshow("aruco", img)
+        #newImage = bpy.data.images.new("aruco_board", 864, 1080, alpha=True, float_buffer=True)
+        #newImage.pixels = np.asarray(img).flatten()
+        #newImage.update()
+        return {'FINISHED'}
+
 class calibrate(bpy.types.Operator, ImportHelper):
     bl_idname = "facebow.calibrate"
     bl_label = "Select File"
@@ -66,8 +84,18 @@ class captured_patient_data(bpy.types.Operator, ImportHelper):
         print('File extension:', extension)
         return {'FINISHED'}
 
+class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
+    # this must match the add-on name, use '__package__'
+    # when defining this in a submodule of a python package.
+    bl_idname = __name__
 
-class HelloWorldPanel(bpy.types.Panel, ImportHelper):
+    def draw(self, context):
+        layout = self.layout
+        layout.label(text="Open Dental CAD Facebow Preferences:")
+        row = layout.row()
+        row.operator("facebow.generate_aruco_board")
+        
+class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
     """Creates a Panel in the Object properties window"""
     bl_label = "ODC Facebow"
     bl_idname = "SCENE_PT_layout"
@@ -96,13 +124,17 @@ class HelloWorldPanel(bpy.types.Panel, ImportHelper):
 
 
 def register():
-    bpy.utils.register_class(HelloWorldPanel)
+    bpy.utils.register_class(ODC_Facebow_Preferences)
+    bpy.utils.register_class(ODC_Facebow_Panel)
+    bpy.utils.register_class(generate_calibration_board)
     bpy.utils.register_class(calibrate)
     bpy.utils.register_class(captured_patient_data)
 
 
 def unregister():
-    bpy.utils.unregister_class(HelloWorldPanel)
+    bpy.utils.unregister_class(ODC_Facebow_Preferences)
+    bpy.utils.unregister_class(ODC_Facebow_Panel)
+    bpy.utils.unregister_class(generate_calibration_board)
     bpy.utils.unregister_class(calibrate)
     bpy.utils.unregister_class(captured_patient_data)
 
