@@ -62,7 +62,7 @@ class generate_tracking_marker(bpy.types.Operator):
         # second param is ID number
         # last param is total image size
         for i in range(0, context.scene.facebow_marker_num):
-            img = aruco.drawMarker(context.scene.aruco_dict, i, 700)
+            img = aruco.drawMarker(context.scene.aruco_dict, i, context.scene.facebow_marker_res)
             cv2.imwrite(os.path.join(folder, str(i)+".jpg"), img)
         return {'FINISHED'}
 
@@ -147,12 +147,14 @@ class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
         row.prop(context.scene, "cal_board_marker_length")
         row.prop(context.scene, "cal_board_marker_separation")
         row = layout.row()
-        row.operator("facebow.generate_aruco_board")
+        row.operator("facebow.generate_aruco_board", text="Generate")
         row = layout.row()
         row = layout.row()
         row.label(text="Markers Setup")
         row = layout.row()
         row.prop(context.scene, "facebow_marker_num")
+        row.prop(context.scene, "facebow_marker_res")
+        row = layout.row()
         row.operator("facebow.generate_aruco_marker", text="Generate")
         
 class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
@@ -185,6 +187,7 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
 
 def register():
     bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11)
+    
 
     bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4, min=1)
     bpy.types.Scene.cal_board_Y_num = bpy.props.IntProperty(name="Height:", description="Number of markers arranged along the height.", default=5, min=1)
@@ -193,6 +196,7 @@ def register():
     bpy.types.Scene.cal_board_marker_length = bpy.props.FloatProperty(name="Marker length:", description="in cm", soft_min=0.00, default=3.75)
     bpy.types.Scene.cal_board_marker_separation = bpy.props.FloatProperty(name="Marker separation:", description="in cm", soft_min=0.00, default=0.50)
     bpy.types.Scene.facebow_marker_num = bpy.props.IntProperty(name="Number of markers:", description="Total number of markers to be generated for tracking.", default=4, min=1)
+    bpy.types.Scene.facebow_marker_res = bpy.props.IntProperty(name="Marker size:", description="Tracking marker resolution.", default=700, min=100)
     
     bpy.utils.register_class(ODC_Facebow_Preferences)
     bpy.utils.register_class(ODC_Facebow_Panel)
@@ -212,6 +216,7 @@ def unregister():
     del bpy.types.Scene.cal_board_marker_length
     del bpy.types.Scene.cal_board_marker_separation
     del bpy.types.Scene.facebow_marker_num
+    del bpy.types.Scene.facebow_marker_res
     
     bpy.utils.unregister_class(ODC_Facebow_Preferences)
     bpy.utils.unregister_class(ODC_Facebow_Panel)
