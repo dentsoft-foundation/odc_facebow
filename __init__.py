@@ -1,5 +1,5 @@
 import os, shutil
-import pickle
+import pickle, glob
 import numpy as np
 import bpy
 from bpy_extras.io_utils import ImportHelper
@@ -27,7 +27,7 @@ except ModuleNotFoundError as e:
 
 bl_info = {
     "name": "Open Dental CAD Digital Facebow",
-    "author": "Patrick R. Moore, Ilya Fomenko, Georgi Talmazov",
+    "author": "Georgi Talmazov, Ilya Fomenko, Patrick R. Moore",
     "version": (0, 1),
     "blender": (2, 83, 0),
     "location": "3D View -> UI SIDE PANEL",
@@ -74,7 +74,12 @@ class generate_calibration_board(bpy.types.Operator):
         folder = "C:/Users/talmazovg/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow"
         print(folder)
         #aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_1000 )
-        board = aruco.GridBoard_create(context.scene.cal_board_X_num, context.scene.cal_board_Y_num, context.scene.cal_board_marker_length, context.scene.cal_board_marker_separation, context.scene.aruco_dict)
+        board = aruco.CharucoBoard_create(
+                squaresX=context.scene.cal_board_X_num,
+                squaresY=context.scene.cal_board_Y_num,
+                squareLength=context.scene.cal_board_marker_length,
+                markerLength=context.scene.cal_board_marker_separation,
+                dictionary=context.scene.aruco_dict)
         print("generated calibration board")
         img = board.draw((context.scene.cal_board_X_res,context.scene.cal_board_Y_res))
         cv2.imwrite(os.path.join(folder,"calibration_board.jpg"), img)
@@ -94,20 +99,148 @@ class generate_calibration_board(bpy.types.Operator):
 
 class calibrate(bpy.types.Operator, ImportHelper):
     bl_idname = "facebow.calibrate"
-    bl_label = "Select File"
+    bl_label = "Select Folder"
 
     filter_glob: bpy.props.StringProperty(default='*.*', options={'HIDDEN'})
 
+    files = bpy.props.CollectionProperty(
+            name="File Path",
+            type=bpy.types.OperatorFileListElement,
+            )
+    directory = bpy.props.StringProperty(
+            subtype='DIR_PATH',
+            )
+
+
     def execute(self, context):
         """Do something with the selected file(s)."""
+
+        # Create constants to be passed into OpenCV and Aruco methods
+        CHARUCO_BOARD = aruco.CharucoBoard_create(
+                squaresX=context.scene.cal_board_X_num,
+                squaresY=context.scene.cal_board_Y_num,
+                squareLength=context.scene.cal_board_marker_length,
+                markerLength=context.scene.cal_board_marker_separation,
+                dictionary=context.scene.aruco_dict)
+        
+        # Create the arrays and variables we'll use to store info like corners and IDs from images processed
+        corners_all = [] # Corners discovered in all images processed
+        ids_all = [] # Aruco ids corresponding to corners discovered
+        image_size = None # Determined at runtime
+
+        directory = self.directory
+        for file_elem in self.files:
+            filepath = os.path.join(directory, file_elem.name)
+            print(filepath)
+
+        images = glob.glob(self.directory+'*.jpg')
+
+        # Loop through images glob'ed
+        for iname in images:
+            # Open the image
+            img = cv2.imread(iname)
+            # Grayscale the image
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+            # Find aruco markers in the query image
+            corners, ids, _ = aruco.detectMarkers(
+                    image=gray,
+                    dictionary=context.scene.aruco_dict)
+
+            # Outline the aruco markers found in our query image
+            img = aruco.drawDetectedMarkers(
+                    image=img, 
+                    corners=corners)
+
+            # Get charuco corners and ids from detected aruco markers
+            response, charuco_corners, charuco_ids = aruco.interpolateCornersCharuco(
+                    markerCorners=corners,
+                    markerIds=ids,
+                    image=gray,
+                    board=CHARUCO_BOARD)
+
+            # If a Charuco board was found, let's collect image/corner points
+            # Requiring at least 20 squares
+            if response > 20:
+                # Add these corners and ids to our calibration arrays
+                corners_all.append(charuco_corners)
+                ids_all.append(charuco_ids)
+                
+                # Draw the Charuco board we've detected to show our calibrator the board was properly detected
+                img = aruco.drawDetectedCornersCharuco(
+                        image=img,
+                        charucoCorners=charuco_corners,
+                        charucoIds=charuco_ids)
+            
+                # If our image size is unknown, set it now
+                if not image_size:
+                    image_size = gray.shape[::-1]
+            
+                # Reproportion the image, maxing width or height at 1000
+                proportion = max(img.shape) / 1000.0
+                img = cv2.resize(img, (int(img.shape[1]/proportion), int(img.shape[0]/proportion)))
+                # Pause to display each image, waiting for key press
+                cv2.imshow('Charuco board', img)
+                cv2.waitKey(0)
+            else:
+                print("Not able to detect a charuco board in image: {}".format(iname))
+
+        # Destroy any open CV windows
+        cv2.destroyAllWindows()
+
+        # Make sure at least one image was found
+        if len(images) < 1:
+            # Calibration failed because there were no images, warn the user
+            print("Calibration was unsuccessful. No images of charucoboards were found. Add images of charucoboards and use or alter the naming conventions used in this file.")
+
+        # Make sure we were able to calibrate on at least one charucoboard by checking
+        # if we ever determined the image size
+        if not image_size:
+            # Calibration failed because we didn't see any charucoboards of the PatternSize used
+            print("Calibration was unsuccessful. We couldn't detect charucoboards in any of the images supplied. Try changing the patternSize passed into Charucoboard_create(), or try different pictures of charucoboards.")
+
+        # Now that we've seen all of our images, perform the camera calibration
+        # based on the set of points we've discovered
+        calibration, bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, rvecs, tvecs = aruco.calibrateCameraCharuco(
+                charucoCorners=corners_all,
+                charucoIds=ids_all,
+                board=CHARUCO_BOARD,
+                imageSize=image_size,
+                cameraMatrix=None,
+                distCoeffs=None)
+            
+        # Print matrix and distortion coefficient to the console
+        print(bpy.types.Scene.cameraMatrix)
+        print(bpy.types.Scene.distCoeffs)
+            
+        # Save values to be used where matrix+dist is required, for instance for posture estimation
+        # I save files in a pickle file, but you can use yaml or whatever works for you
+        f = open(self.directory+'calibration.pckl', 'wb')
+        pickle.dump((bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, rvecs, tvecs), f)
+        f.close()
+            
+        # Print to console our success
+        print('Calibration successful. Calibration file used: {}'.format(self.directory+'calibration.pckl'))
+        return {'FINISHED'}
+
+class load_config(bpy.types.Operator, ImportHelper):
+    bl_idname = "facebow.load_config"
+    bl_label = "Select File"
+
+    filter_glob: bpy.props.StringProperty(default='*.pckl', options={'HIDDEN'})
+
+    def execute(self, context):
         filename, extension = os.path.splitext(self.filepath)
         print('Selected file:', self.filepath)
         print('File name:', filename)
         print('File extension:', extension)
         infile = open(self.filepath,'rb')
-        try: calibration_data = pickle.load(infile)
+        try: 
+            calibration_data = pickle.load(infile)
+            (bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, _, _) = calibration_data
         except: print("Not a python pickled file.")
         infile.close()
+
         return {'FINISHED'}
 
 class captured_patient_data(bpy.types.Operator, ImportHelper):
@@ -173,9 +306,11 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
         obj = context.object
 
         row = layout.row()
-        row.label(text="Calibration")
-        row = layout.row()
+        row.label(text="Calibrate: ")
         row.operator("facebow.calibrate")
+        row = layout.row()
+        row.label(text="Configure: ")
+        row.operator("facebow.load_config")
 
         row = layout.row()
         row.label(text="Facebow")
@@ -187,7 +322,8 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
 
 def register():
     bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11)
-    
+    bpy.types.Scene.cameraMatrix = None
+    bpy.types.Scene.distCoeffs = None
 
     bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4, min=1)
     bpy.types.Scene.cal_board_Y_num = bpy.props.IntProperty(name="Height:", description="Number of markers arranged along the height.", default=5, min=1)
@@ -203,6 +339,7 @@ def register():
     bpy.utils.register_class(generate_tracking_marker)
     bpy.utils.register_class(generate_calibration_board)
     bpy.utils.register_class(calibrate)
+    bpy.utils.register_class(load_config)
     bpy.utils.register_class(captured_patient_data)
 
 
@@ -223,6 +360,7 @@ def unregister():
     bpy.utils.unregister_class(generate_tracking_marker)
     bpy.utils.unregister_class(generate_calibration_board)
     bpy.utils.unregister_class(calibrate)
+    bpy.utils.unregister_class(load_config)
     bpy.utils.unregister_class(captured_patient_data)
 
 
