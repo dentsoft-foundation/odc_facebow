@@ -1,10 +1,13 @@
 import os, sys, shutil, threading
 import pickle, glob
 import numpy as np
+from mathutils import Matrix
 import bpy
 from bpy_extras.io_utils import ImportHelper
 
 import pip
+
+import time
 
 def pymod_install(package):
     if hasattr(pip, 'main'):
@@ -75,33 +78,28 @@ class aruco_tracker():
             for one in rejected_img_points:
                 more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
             
-        # Outline all of the markers detected in our image
+            # Outline all of the markers detected in our image
             
             if np.all(ids is not None):  # If there are markers found by detector
-            
-                print('frame')
-                orig_stdout = sys.stdout
-                f = open(folder+'out.txt', 'a')
-                sys.stdout = f
-                print('frame')
-                sys.stdout = orig_stdout
-                f.close()
                 for i in range(0, len(ids)):  # Iterate in markers
                     # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
                     rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i]*2, 0.021, context.scene.cameraMatrix, context.scene.distCoeffs) 
                     (rvec - tvec).any()  # get rid of that nasty numpy value array error
                                 
-                    print(ids[i], tvec)
+                    #print(ids[i], tvec[0][0])
+                    #print(ids)
+                    bpy.data.objects[str(ids[i][0])].matrix_world = Matrix(
+                        [[0.01, 0.0, 0.0, float(tvec[0][0][0])],
+                        [0.0, 0.01, 0.0, float(tvec[0][0][1])],
+                        [0.0, 0.0, 0.01, float(tvec[0][0][2])],
+                        [0.0, 0.0, 0.0, 1.0]]
+                    )
+                    dg = context.evaluated_depsgraph_get()
+                    dg.update()
                     
-                    orig_stdout = sys.stdout
-                    f = open(folder+'out.txt', 'a')
-                    sys.stdout = f
-                    print(ids[i], tvec)
-                    sys.stdout = orig_stdout
-                    f.close()
-
                     #cv2.aruco.drawDetectedMarkers(img,corners,ids)
                     aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
+                    #time.sleep(0.1)
                 
             cv2.namedWindow("img", cv2.WINDOW_NORMAL)
             #cv2.namedWindow("thresh1", cv2.WINDOW_NORMAL)
@@ -114,7 +112,7 @@ class aruco_tracker():
             if cv2.waitKey(1) & 0xFF ==ord('q'):
                 break
         cv2.destroyAllWindows()
-        self.processor_thread.join()
+        #self.processor_thread.join()
 
 bl_info = {
     "name": "Open Dental CAD Digital Facebow",
