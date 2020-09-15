@@ -1,4 +1,4 @@
-import os, shutil, threading
+import os, sys, shutil, threading
 import pickle, glob
 import numpy as np
 import bpy
@@ -88,7 +88,7 @@ class aruco_tracker():
                 f.close()
                 for i in range(0, len(ids)):  # Iterate in markers
                     # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
-                    rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i]*2, 0.021, cameraMatrix, distCoeffs) 
+                    rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i]*2, 0.021, context.scene.cameraMatrix, context.scene.distCoeffs) 
                     (rvec - tvec).any()  # get rid of that nasty numpy value array error
                                 
                     print(ids[i], tvec)
@@ -101,7 +101,7 @@ class aruco_tracker():
                     f.close()
 
                     #cv2.aruco.drawDetectedMarkers(img,corners,ids)
-                    aruco.drawAxis(img, cameraMatrix, distCoeffs, rvec, tvec, 0.02)  # Draw Axis
+                    aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
                 
             cv2.namedWindow("img", cv2.WINDOW_NORMAL)
             #cv2.namedWindow("thresh1", cv2.WINDOW_NORMAL)
@@ -353,7 +353,7 @@ class analyze_data(bpy.types.Operator):
     bl_label = "Analyze"
 
     def execute(self, context):
-        aruco_tracker(context)
+        aruco_tracker(context, "C:/Users/talmazovg/Downloads/1.mp4")
         return {'FINISHED'}
 
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
