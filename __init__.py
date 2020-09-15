@@ -1,4 +1,4 @@
-import os, shutil
+import os, shutil, threading
 import pickle, glob
 import numpy as np
 import bpy
@@ -24,6 +24,97 @@ except ModuleNotFoundError as e:
         from cv2 import aruco
     except ModuleNotFoundError as e: print("Failed to pip install dependencies!")
 
+class aruco_tracker():
+    def __init__(self, context, data_source=cv2.CAP_DSHOW):
+        self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source))
+        self.processor_thread.start()
+
+    def stream_processor(self, context, data_source):
+        folder = "C:/Users/talmazovg/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow/"
+        
+        # Constant parameters used in Aruco methods
+        ARUCO_PARAMETERS = aruco.DetectorParameters_create()
+        ARUCO_DICT = context.scene.aruco_dict
+        ARUCO_PARAMETERS.cornerRefinementMethod = aruco.CORNER_REFINE_APRILTAG
+
+        # Create vectors we'll be using for rotations and translations for postures
+        rvecs, tvecs = None, None
+
+        cap = cv2.VideoCapture(data_source)
+        #cam = cv2.VideoCapture("1.mp4")
+        # codec = 0x47504A4D # MJPG
+        # codec = 844715353.0 # YUY2
+
+        codec = 0x47504A4D # MJPG
+        cap.set(cv2.CAP_PROP_FOURCC, codec)
+
+        cap.set(3, 3840) #3. CV_CAP_PROP_FRAME_WIDTH Width of the frames in the video stream.
+        cap.set(4, 2160) #4. CV_CAP_PROP_FRAME_HEIGHT Height of the frames in the video stream.
+        cap.set(10, 12) #10. CV_CAP_PROP_BRIGHTNESS Brightness of the image (only for cameras).
+        cap.set(21, 0) #
+        cap.set(15, -6)
+        cap.set(39, 0)
+        cap.set(28, 60)
+        cap.set(5, 30) #5. CV_CAP_PROP_FPS Frame rate.
+
+        board = aruco.GridBoard_create(
+                markersX=3,
+                markersY=1,
+                markerLength=context.scene.cal_board_marker_separation,
+                markerSeparation=0.0093,
+                dictionary=ARUCO_DICT)
+
+        while True:
+            success, img = cap.read()
+            imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+            #imgBlur = cv2.GaussianBlur(imgGrey,(11,11),cv2.BORDER_DEFAULT)
+            imgPyrDown = cv2.pyrDown(imgGrey)
+
+            # lists of ids and the corners beloning to each id
+            corners, ids, rejected_img_points = aruco.detectMarkers(imgPyrDown, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
+            for one in rejected_img_points:
+                more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
+            
+        # Outline all of the markers detected in our image
+            
+            if np.all(ids is not None):  # If there are markers found by detector
+            
+                print('frame')
+                orig_stdout = sys.stdout
+                f = open(folder+'out.txt', 'a')
+                sys.stdout = f
+                print('frame')
+                sys.stdout = orig_stdout
+                f.close()
+                for i in range(0, len(ids)):  # Iterate in markers
+                    # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
+                    rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i]*2, 0.021, cameraMatrix, distCoeffs) 
+                    (rvec - tvec).any()  # get rid of that nasty numpy value array error
+                                
+                    print(ids[i], tvec)
+                    
+                    orig_stdout = sys.stdout
+                    f = open(folder+'out.txt', 'a')
+                    sys.stdout = f
+                    print(ids[i], tvec)
+                    sys.stdout = orig_stdout
+                    f.close()
+
+                    #cv2.aruco.drawDetectedMarkers(img,corners,ids)
+                    aruco.drawAxis(img, cameraMatrix, distCoeffs, rvec, tvec, 0.02)  # Draw Axis
+                
+            cv2.namedWindow("img", cv2.WINDOW_NORMAL)
+            #cv2.namedWindow("thresh1", cv2.WINDOW_NORMAL)
+            cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
+
+            cv2.imshow("img", img)
+            #cv2.imshow("thresh1", thresh1)
+            cv2.imshow("PyrDown", imgPyrDown)
+
+            if cv2.waitKey(1) & 0xFF ==ord('q'):
+                break
+        cv2.destroyAllWindows()
+        self.processor_thread.join()
 
 bl_info = {
     "name": "Open Dental CAD Digital Facebow",
@@ -257,6 +348,14 @@ class captured_patient_data(bpy.types.Operator, ImportHelper):
         print('File extension:', extension)
         return {'FINISHED'}
 
+class analyze_data(bpy.types.Operator):
+    bl_idname = "facebow.analyze"
+    bl_label = "Analyze"
+
+    def execute(self, context):
+        aruco_tracker(context)
+        return {'FINISHED'}
+
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
     # this must match the add-on name, use '__package__'
     # when defining this in a submodule of a python package.
@@ -317,6 +416,8 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
         row = layout.row()
         row.operator("facebow.input")
         row = layout.row()
+        row.operator("facebow.analyze")
+        row = layout.row()
         row.prop(obj, "name")
 
 
@@ -341,10 +442,13 @@ def register():
     bpy.utils.register_class(calibrate)
     bpy.utils.register_class(load_config)
     bpy.utils.register_class(captured_patient_data)
+    bpy.utils.register_class(analyze_data)
 
 
 def unregister():
     del bpy.types.Scene.aruco_dict
+    del bpy.types.Scene.cameraMatrix
+    del bpy.types.Scene.distCoeffs
 
     del bpy.types.Scene.cal_board_X_num
     del bpy.types.Scene.cal_board_Y_num
@@ -362,6 +466,7 @@ def unregister():
     bpy.utils.unregister_class(calibrate)
     bpy.utils.unregister_class(load_config)
     bpy.utils.unregister_class(captured_patient_data)
+    bpy.utils.unregister_class(analyze_data)
 
 
 if __name__ == "__main__":
