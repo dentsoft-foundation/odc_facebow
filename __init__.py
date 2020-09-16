@@ -1,4 +1,4 @@
-import os, sys, shutil, threading
+import os, sys, shutil, threading, queue
 import pickle, glob
 import numpy as np
 from mathutils import Matrix
@@ -31,6 +31,17 @@ class aruco_tracker():
     def __init__(self, context, data_source=cv2.CAP_DSHOW, debug=False):
         self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source, debug))
         self.processor_thread.start()
+        self.queue = queue.Queue()
+
+    def update_scene(self, context, markerID, tvec):
+        bpy.data.objects[str(markerID)].matrix_world = Matrix(
+            [[0.01, 0.0, 0.0, float(tvec[0][0][0])],
+            [0.0, 0.01, 0.0, float(tvec[0][0][1])],
+            [0.0, 0.0, 0.01, float(tvec[0][0][2])],
+            [0.0, 0.0, 0.0, 1.0]]
+        )
+        dg = context.evaluated_depsgraph_get()
+        dg.update()
 
     def stream_processor(self, context, data_source, debug=False):
         # Constant parameters used in Aruco methods
@@ -90,14 +101,7 @@ class aruco_tracker():
                     #cv2.aruco.drawDetectedMarkers(img,corners,ids)
                     aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
 
-                    bpy.data.objects[str(ids[i][0])].matrix_world = Matrix(
-                        [[0.01, 0.0, 0.0, float(tvec[0][0][0])],
-                        [0.0, 0.01, 0.0, float(tvec[0][0][1])],
-                        [0.0, 0.0, 0.01, float(tvec[0][0][2])],
-                        [0.0, 0.0, 0.0, 1.0]]
-                    )
-                    dg = context.evaluated_depsgraph_get()
-                    dg.update()
+                    self.queue.put([ids[i][0], tvec])
                 
             if debug == True:
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
@@ -348,9 +352,11 @@ class analyze_data(bpy.types.Operator):
 
     def execute(self, context):
         if context.scene.live_cam == True:
-            aruco_tracker(context, debug=context.scene.debug_cv)
+            bpy.types.Scene.tracker_instance = aruco_tracker(context, debug=context.scene.debug_cv)
+            bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
         else:
-            aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv)
+            bpy.types.Scene.tracker_instance = aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv)
+            bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
         return {'FINISHED'}
 
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
@@ -422,6 +428,40 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
         row = layout.row()
         row.operator("facebow.analyze")
 
+class ModalTimerOperator(bpy.types.Operator):
+    """Operator which runs its self from a timer"""
+    bl_idname = "wm.modal_timer_operator"
+    bl_label = "Modal Timer Operator"
+
+    _timer = None
+
+    def modal(self, context, event):
+        if event.type in {'ESC'}:
+            self.cancel(context)
+            return {'CANCELLED'}
+
+        if event.type == 'TIMER':
+            while not context.scene.tracker_instance.queue.empty():
+                try:
+                    data = context.scene.tracker_instance.queue.get_nowait()
+                    context.scene.tracker_instance.update_scene(context, data[0], data[1])
+                except queue.Empty: continue
+                context.scene.tracker_instance.queue.task_done()
+
+            context.scene.tracker_instance.queue.join()
+
+        return {'PASS_THROUGH'}
+
+    def execute(self, context):
+        wm = context.window_manager
+        self._timer = wm.event_timer_add(0.05, window=context.window)
+        wm.modal_handler_add(self)
+        return {'RUNNING_MODAL'}
+
+    def cancel(self, context):
+        wm = context.window_manager
+        wm.event_timer_remove(self._timer)
+
 
 def register():
     bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=False)
@@ -429,6 +469,7 @@ def register():
     bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11)
     bpy.types.Scene.cameraMatrix = None
     bpy.types.Scene.distCoeffs = None
+    bpy.types.Scene.tracker_instance = None
 
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
@@ -457,6 +498,8 @@ def register():
     bpy.utils.register_class(captured_patient_data)
     bpy.utils.register_class(analyze_data)
 
+    bpy.utils.register_class(ModalTimerOperator)
+
 
 def unregister():
     del bpy.types.Scene.debug_cv
@@ -464,6 +507,7 @@ def unregister():
     del bpy.types.Scene.aruco_dict
     del bpy.types.Scene.cameraMatrix
     del bpy.types.Scene.distCoeffs
+    del bpy.types.Scene.tracker_instance
 
     del bpy.types.Scene.live_cam
     del bpy.types.Scene.pt_record
@@ -490,6 +534,8 @@ def unregister():
     bpy.utils.unregister_class(load_config)
     bpy.utils.unregister_class(captured_patient_data)
     bpy.utils.unregister_class(analyze_data)
+
+    bpy.utils.unregister_class(ModalTimerOperator)
 
 
 if __name__ == "__main__":
