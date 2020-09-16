@@ -28,13 +28,11 @@ except ModuleNotFoundError as e:
     except ModuleNotFoundError as e: print("Failed to pip install dependencies!")
 
 class aruco_tracker():
-    def __init__(self, context, data_source=cv2.CAP_DSHOW):
-        self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source))
+    def __init__(self, context, data_source=cv2.CAP_DSHOW, debug=False):
+        self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source, debug))
         self.processor_thread.start()
 
-    def stream_processor(self, context, data_source):
-        folder = "C:/Users/talmazovg/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow/"
-        
+    def stream_processor(self, context, data_source, debug=False):
         # Constant parameters used in Aruco methods
         ARUCO_PARAMETERS = aruco.DetectorParameters_create()
         ARUCO_DICT = context.scene.aruco_dict
@@ -88,6 +86,10 @@ class aruco_tracker():
                                 
                     #print(ids[i], tvec[0][0])
                     #print(ids)
+                    
+                    #cv2.aruco.drawDetectedMarkers(img,corners,ids)
+                    aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
+
                     bpy.data.objects[str(ids[i][0])].matrix_world = Matrix(
                         [[0.01, 0.0, 0.0, float(tvec[0][0][0])],
                         [0.0, 0.01, 0.0, float(tvec[0][0][1])],
@@ -96,22 +98,15 @@ class aruco_tracker():
                     )
                     dg = context.evaluated_depsgraph_get()
                     dg.update()
-                    
-                    #cv2.aruco.drawDetectedMarkers(img,corners,ids)
-                    aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
-                    #time.sleep(0.1)
                 
-            cv2.namedWindow("img", cv2.WINDOW_NORMAL)
-            #cv2.namedWindow("thresh1", cv2.WINDOW_NORMAL)
-            cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
-
-            cv2.imshow("img", img)
-            #cv2.imshow("thresh1", thresh1)
-            cv2.imshow("PyrDown", imgPyrDown)
-
-            if cv2.waitKey(1) & 0xFF ==ord('q'):
-                break
-        cv2.destroyAllWindows()
+            if debug == True:
+                cv2.namedWindow("img", cv2.WINDOW_NORMAL)
+                cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
+                cv2.imshow("img", img)
+                cv2.imshow("PyrDown", imgPyrDown)
+                if cv2.waitKey(1) & 0xFF ==ord('q'):
+                    break
+        if debug == True: cv2.destroyAllWindows()
         #self.processor_thread.join()
 
 bl_info = {
@@ -344,6 +339,7 @@ class captured_patient_data(bpy.types.Operator, ImportHelper):
         print('Selected file:', self.filepath)
         print('File name:', filename)
         print('File extension:', extension)
+        context.scene.pt_record = self.filepath
         return {'FINISHED'}
 
 class analyze_data(bpy.types.Operator):
@@ -351,7 +347,10 @@ class analyze_data(bpy.types.Operator):
     bl_label = "Analyze"
 
     def execute(self, context):
-        aruco_tracker(context, "C:/Users/talmazovg/Downloads/1.mp4")
+        if context.scene.live_cam == True:
+            aruco_tracker(context, debug=context.scene.debug_cv)
+        else:
+            aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv)
         return {'FINISHED'}
 
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
@@ -386,6 +385,8 @@ class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
         row.prop(context.scene, "facebow_marker_res")
         row = layout.row()
         row.operator("facebow.generate_aruco_marker", text="Generate")
+        row = layout.row()
+        row.prop(context.scene, "debug_cv")
         
 class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
     """Creates a Panel in the Object properties window"""
@@ -412,17 +413,31 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
         row = layout.row()
         row.label(text="Facebow")
         row = layout.row()
-        row.operator("facebow.input")
+        row.prop(context.scene, "live_cam")
+        if context.scene.live_cam == False:
+            row = layout.row()
+            row.operator("facebow.input")
+            row = layout.row()
+            row.prop(context.scene, "pt_record")
         row = layout.row()
         row.operator("facebow.analyze")
-        row = layout.row()
-        row.prop(obj, "name")
 
 
 def register():
+    bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=False)
+
     bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11)
     bpy.types.Scene.cameraMatrix = None
     bpy.types.Scene.distCoeffs = None
+
+    bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
+    bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
+
+    #bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4)
+    #bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty
+    #bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty
+    #bpy.types.Scene.CAMERA_BRIGHTNESS = bpy.props.IntProperty
+
 
     bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4, min=1)
     bpy.types.Scene.cal_board_Y_num = bpy.props.IntProperty(name="Height:", description="Number of markers arranged along the height.", default=5, min=1)
@@ -444,9 +459,19 @@ def register():
 
 
 def unregister():
+    del bpy.types.Scene.debug_cv
+
     del bpy.types.Scene.aruco_dict
     del bpy.types.Scene.cameraMatrix
     del bpy.types.Scene.distCoeffs
+
+    del bpy.types.Scene.live_cam
+    del bpy.types.Scene.pt_record
+
+    del bpy.types.Scene.FRAME_WIDTH
+    del bpy.types.Scene.FRAME_HEIGHT
+    del bpy.types.Scene.VIDEO_FPS
+    del bpy.types.Scene.CAMERA_BRIGHTNESS
 
     del bpy.types.Scene.cal_board_X_num
     del bpy.types.Scene.cal_board_Y_num
