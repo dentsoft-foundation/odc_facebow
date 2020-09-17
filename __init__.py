@@ -60,14 +60,17 @@ class aruco_tracker():
         codec = 0x47504A4D # MJPG
         cap.set(cv2.CAP_PROP_FOURCC, codec)
 
-        cap.set(3, 3840) #3. CV_CAP_PROP_FRAME_WIDTH Width of the frames in the video stream.
-        cap.set(4, 2160) #4. CV_CAP_PROP_FRAME_HEIGHT Height of the frames in the video stream.
-        cap.set(10, 12) #10. CV_CAP_PROP_BRIGHTNESS Brightness of the image (only for cameras).
+        if data_source == cv2.CAP_DSHOW:
+            cap.set(3, context.scene.FRAME_WIDTH) #3. CV_CAP_PROP_FRAME_WIDTH Width of the frames in the video stream.
+            cap.set(4, context.scene.FRAME_HEIGHT) #4. CV_CAP_PROP_FRAME_HEIGHT Height of the frames in the video stream.
+            cap.set(10, context.scene.CAMERA_BRIGHTNESS) #10. CV_CAP_PROP_BRIGHTNESS Brightness of the image (only for cameras).
+            cap.set(5, context.scene.VIDEO_FPS) #5. CV_CAP_PROP_FPS Frame rate.
+
         cap.set(21, 0) #
         cap.set(15, -6)
         cap.set(39, 0)
         cap.set(28, 60)
-        cap.set(5, 30) #5. CV_CAP_PROP_FPS Frame rate.
+        
 
         board = aruco.GridBoard_create(
                 markersX=3,
@@ -393,6 +396,15 @@ class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
         row.operator("facebow.generate_aruco_marker", text="Generate")
         row = layout.row()
         row.prop(context.scene, "debug_cv")
+        row = layout.row()
+        row.label(text="Camera Settings")
+        row = layout.row()
+        row.prop(context.scene, "FRAME_WIDTH")
+        row.prop(context.scene, "FRAME_HEIGHT")
+        row = layout.row()
+        row.prop(context.scene, "VIDEO_FPS")
+        row.prop(context.scene, "CAMERA_BRIGHTNESS")
+
         
 class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
     """Creates a Panel in the Object properties window"""
@@ -474,10 +486,10 @@ def register():
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
 
-    #bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4)
-    #bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty
-    #bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty
-    #bpy.types.Scene.CAMERA_BRIGHTNESS = bpy.props.IntProperty
+    bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=3840)
+    bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=2160)
+    bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=30)
+    bpy.types.Scene.CAMERA_BRIGHTNESS = bpy.props.IntProperty(name="Brightness:", description="", default=12)
 
 
     bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4, min=1)
