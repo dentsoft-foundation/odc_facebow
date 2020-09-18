@@ -65,11 +65,16 @@ class aruco_tracker():
             cap.set(4, context.scene.FRAME_HEIGHT) #4. CV_CAP_PROP_FRAME_HEIGHT Height of the frames in the video stream.
             cap.set(10, context.scene.CAMERA_BRIGHTNESS) #10. CV_CAP_PROP_BRIGHTNESS Brightness of the image (only for cameras).
             cap.set(5, context.scene.VIDEO_FPS) #5. CV_CAP_PROP_FPS Frame rate.
-
-        cap.set(21, 0) #
-        cap.set(15, -6)
-        cap.set(39, 0)
-        cap.set(28, 60)
+            if context.scene.CAMERA_AUTO_EXPOSURE == False:
+                cap.set(21, 0) #PROP_AUTO_EXPOSURE =21; 0 = OFF/FALSE
+                cap.set(15, context.scene.CAMERA_EXPOSURE_VAL) #CV_CAP_PROP_EXPOSURE
+            elif context.scene.CAMERA_AUTO_EXPOSURE == True:
+                cap.set(21, 1)
+            if context.scene.CAMERA_AUTO_FOCUS == False:
+                cap.set(39, 0) #CAP_PROP_AUTOFOCUS =39
+                cap.set(28, context.scene.CAMERA_FOCUS_VAL) #CAP_PROP_FOCUS =28
+            elif context.scene.CAMERA_AUTO_FOCUS == True:
+                cap.set(39, 1)
         
 
         board = aruco.GridBoard_create(
@@ -397,15 +402,20 @@ class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
         row = layout.row()
         row.prop(context.scene, "debug_cv")
         row = layout.row()
-        row.label(text="Camera Settings")
+        row.label(text="Live Camera Settings")
         row = layout.row()
         row.prop(context.scene, "FRAME_WIDTH")
         row.prop(context.scene, "FRAME_HEIGHT")
         row = layout.row()
         row.prop(context.scene, "VIDEO_FPS")
         row.prop(context.scene, "CAMERA_BRIGHTNESS")
+        row = layout.row()
+        row.prop(context.scene, "CAMERA_EXPOSURE_VAL")
+        row.prop(context.scene, "CAMERA_AUTO_EXPOSURE")
+        row = layout.row()
+        row.prop(context.scene, "CAMERA_FOCUS_VAL")
+        row.prop(context.scene, "CAMERA_AUTO_FOCUS")
 
-        
 class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
     """Creates a Panel in the Object properties window"""
     bl_label = "ODC Facebow"
@@ -490,6 +500,10 @@ def register():
     bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=2160)
     bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=30)
     bpy.types.Scene.CAMERA_BRIGHTNESS = bpy.props.IntProperty(name="Brightness:", description="", default=12)
+    bpy.types.Scene.CAMERA_AUTO_EXPOSURE = bpy.props.BoolProperty(name="Auto Exposure", description="", default=False)
+    bpy.types.Scene.CAMERA_EXPOSURE_VAL = bpy.props.IntProperty(name="Exposure:", description="", default=-6)
+    bpy.types.Scene.CAMERA_AUTO_FOCUS = bpy.props.BoolProperty(name="Auto Focus", description="", default=False)
+    bpy.types.Scene.CAMERA_FOCUS_VAL = bpy.props.IntProperty(name="Focal Length (mm):", description="", default=60)
 
 
     bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4, min=1)
@@ -528,6 +542,10 @@ def unregister():
     del bpy.types.Scene.FRAME_HEIGHT
     del bpy.types.Scene.VIDEO_FPS
     del bpy.types.Scene.CAMERA_BRIGHTNESS
+    del bpy.types.Scene.CAMERA_AUTO_EXPOSURE
+    del bpy.types.Scene.CAMERA_EXPOSURE_VAL
+    del bpy.types.Scene.CAMERA_AUTO_FOCUS
+    del bpy.types.Scene.CAMERA_FOCUS_VAL
 
     del bpy.types.Scene.cal_board_X_num
     del bpy.types.Scene.cal_board_Y_num
