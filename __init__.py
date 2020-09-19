@@ -76,31 +76,31 @@ class aruco_tracker():
             elif context.scene.CAMERA_AUTO_FOCUS == True:
                 cap.set(39, 1)
         
-
+        '''
         board = aruco.GridBoard_create(
                 markersX=3,
                 markersY=1,
                 markerLength=context.scene.cal_board_marker_separation,
                 markerSeparation=0.0093,
                 dictionary=ARUCO_DICT)
-
+        '''
         while True:
             success, img = cap.read()
             imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
             #imgBlur = cv2.GaussianBlur(imgGrey,(11,11),cv2.BORDER_DEFAULT)
-            imgPyrDown = cv2.pyrDown(imgGrey)
+            #imgPyrDown = cv2.pyrDown(imgGrey)
 
             # lists of ids and the corners beloning to each id
-            corners, ids, rejected_img_points = aruco.detectMarkers(imgPyrDown, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
-            for one in rejected_img_points:
-                more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
+            corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
+            #for one in rejected_img_points:
+            #    more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
             
             # Outline all of the markers detected in our image
             
             if np.all(ids is not None):  # If there are markers found by detector
                 for i in range(0, len(ids)):  # Iterate in markers
                     # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
-                    rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i]*2, 0.021, context.scene.cameraMatrix, context.scene.distCoeffs) 
+                    rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i], 0.021, context.scene.cameraMatrix, context.scene.distCoeffs) 
                     (rvec - tvec).any()  # get rid of that nasty numpy value array error
                                 
                     #print(ids[i], tvec[0][0])
@@ -113,9 +113,9 @@ class aruco_tracker():
                 
             if debug == True:
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
-                cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
+                #cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
                 cv2.imshow("img", img)
-                cv2.imshow("PyrDown", imgPyrDown)
+                #cv2.imshow("PyrDown", imgPyrDown)
                 if cv2.waitKey(1) & 0xFF ==ord('q'):
                     break
         if debug == True: cv2.destroyAllWindows()
