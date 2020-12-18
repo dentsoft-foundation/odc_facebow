@@ -2,7 +2,8 @@ import os, sys, shutil, threading, queue
 import pickle, glob
 import numpy as np
 from mathutils import Matrix
-import bpy
+import math
+import bpy, bmesh
 from bpy_extras.io_utils import ImportHelper
 
 import pip
@@ -33,15 +34,70 @@ class aruco_tracker():
         self.processor_thread.start()
         self.queue = queue.Queue()
 
-    def update_scene(self, context, markerID, tvec):
-        bpy.data.objects[str(markerID)].matrix_world = Matrix(
+    def update_scene(self, context, markerID, tvec, rvec):
+        # from https://www.learnopencv.com/rotation-matrix-to-euler-angles/
+        # Checks if a matrix is a valid rotation matrix.
+        def isRotationMatrix(R) :
+            Rt = np.transpose(R)
+            shouldBeIdentity = np.dot(Rt, R)
+            I = np.identity(3, dtype = R.dtype)
+            n = np.linalg.norm(I - shouldBeIdentity)
+            return n < 1e-6
+            
+        # Calculates rotation matrix to euler angles
+        # The result is the same as MATLAB except the order
+        # of the euler angles ( x and z are swapped ).
+        def rotationMatrixToEulerAngles(R) :
+            assert(isRotationMatrix(R))
+            sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
+            singular = sy < 1e-6
+            if  not singular :
+                x = math.atan2(R[2,1] , R[2,2])
+                y = math.atan2(-R[2,0], sy)
+                z = math.atan2(R[1,0], R[0,0])
+            else :
+                x = math.atan2(-R[1,2], R[1,1])
+                y = math.atan2(-R[2,0], sy)
+                z = 0
+            return np.array([x, y, z])
+
+        rvec = np.array(rvec)
+        r_matrix, _ = cv2.Rodrigues(rvec) #converts rotation vector to rotation matrix via Rodrigues formula
+        #convert rotation matrix to euler angles
+        r_euler = rotationMatrixToEulerAngles(r_matrix)
+        '''final = Matrix(
             [[0.01, 0.0, 0.0, float(tvec[0][0][0])],
             [0.0, 0.01, 0.0, float(tvec[0][0][1])],
             [0.0, 0.0, 0.01, float(tvec[0][0][2])],
             [0.0, 0.0, 0.0, 1.0]]
-        )
+        )'''
+        #https://docs.blender.org/api/current/mathutils.html
+        # https://docs.blender.org/api/current/mathutils.html#mathutils.Matrix
+        # create an identitiy matrix
+        mat_sca = Matrix.Scale(0.01, 4)
+        mat_trans = Matrix.Translation((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+        # https://devtalk.blender.org/t/understanding-matrix-operations-in-blender/10148
+        mat_rot_x = Matrix.Rotation(r_euler[0], 4, 'X')
+        mat_rot_y = Matrix.Rotation(r_euler[1], 4, 'Y')
+        mat_rot_z = Matrix.Rotation(r_euler[2], 4, 'Z')
+        bpy.data.objects[str(markerID)].matrix_world = mat_trans @ mat_rot_x @ mat_rot_y @ mat_rot_z @ mat_sca
         dg = context.evaluated_depsgraph_get()
         dg.update()
+        #print(markerID, final)
+        if bpy.data.objects.get(str(markerID)+"_trace") is None:
+            mesh = bpy.data.meshes.new(str(markerID)+"_trace_data")  # add a new mesh
+            obj = bpy.data.objects.new(str(markerID)+"_trace", mesh)  # add a new object using the mesh
+            bpy.context.scene.collection.objects.link(obj)  # put the object into the scene (link)
+        else:
+            obj = bpy.data.objects.get(str(markerID)+"_trace")
+        
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        bm.verts.new((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+        bm.verts.ensure_lookup_table()
+        if len(bm.verts) > 1: bm.edges.new((bm.verts[-2], bm.verts[-1]))
+        bm.to_mesh(obj.data)
+        bm.free()
 
     def stream_processor(self, context, data_source, debug=False):
         # Constant parameters used in Aruco methods
@@ -106,10 +162,10 @@ class aruco_tracker():
                     #print(ids[i], tvec[0][0])
                     #print(ids)
                     
-                    #cv2.aruco.drawDetectedMarkers(img,corners,ids)
+                    cv2.aruco.drawDetectedMarkers(img,corners,ids)
                     aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
 
-                    self.queue.put([ids[i][0], tvec])
+                    self.queue.put([ids[i][0], tvec, rvec])
                 
             if debug == True:
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
@@ -466,7 +522,7 @@ class ModalTimerOperator(bpy.types.Operator):
             while not context.scene.tracker_instance.queue.empty():
                 try:
                     data = context.scene.tracker_instance.queue.get_nowait()
-                    context.scene.tracker_instance.update_scene(context, data[0], data[1])
+                    context.scene.tracker_instance.update_scene(context, data[0], data[1], data[2])
                 except queue.Empty: continue
                 context.scene.tracker_instance.queue.task_done()
 
@@ -486,7 +542,7 @@ class ModalTimerOperator(bpy.types.Operator):
 
 
 def register():
-    bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=False)
+    bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=True)
 
     bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11)
     bpy.types.Scene.cameraMatrix = None
@@ -496,14 +552,14 @@ def register():
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
 
-    bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=3840)
-    bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=2160)
-    bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=30)
+    bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=1920)
+    bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=1080)
+    bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=60)
     bpy.types.Scene.CAMERA_BRIGHTNESS = bpy.props.IntProperty(name="Brightness:", description="", default=12)
     bpy.types.Scene.CAMERA_AUTO_EXPOSURE = bpy.props.BoolProperty(name="Auto Exposure", description="", default=False)
     bpy.types.Scene.CAMERA_EXPOSURE_VAL = bpy.props.IntProperty(name="Exposure:", description="", default=-6)
     bpy.types.Scene.CAMERA_AUTO_FOCUS = bpy.props.BoolProperty(name="Auto Focus", description="", default=False)
-    bpy.types.Scene.CAMERA_FOCUS_VAL = bpy.props.IntProperty(name="Focal Length (mm):", description="", default=60)
+    bpy.types.Scene.CAMERA_FOCUS_VAL = bpy.props.IntProperty(name="Focal Length (mm):", description="", default=18)
 
 
     bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4, min=1)
