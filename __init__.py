@@ -1,7 +1,7 @@
 import os, sys, shutil, threading, queue
 import pickle, glob
 import numpy as np
-from mathutils import Matrix
+from mathutils import *
 import math
 import bpy, bmesh
 from bpy_extras.io_utils import ImportHelper
@@ -34,7 +34,7 @@ class aruco_tracker():
         self.processor_thread.start()
         self.queue = queue.Queue()
 
-    def update_scene(self, context, markerID, tvec, rvec):
+    def update_tracking_marker(self, context, markerID, tvec, rvec):
         # from https://www.learnopencv.com/rotation-matrix-to-euler-angles/
         # Checks if a matrix is a valid rotation matrix.
         def isRotationMatrix(R) :
@@ -99,6 +99,22 @@ class aruco_tracker():
         bm.to_mesh(obj.data)
         bm.free()
 
+    def update_point_plane(self, context, point_vecs, plane_obj):
+        plane_scale = plane_obj.scale.copy()
+        plane_loc = 1/3 * (point_vecs[0] + point_vecs[1] + point_vecs[2])
+        x = (point_vecs[1] - point_vecs[0]).normalized()
+        y = (point_vecs[2] - point_vecs[0]).normalized()
+        z = x.cross(y)
+        y = z.cross(x)
+        mat3x3 = Matrix().to_3x3()
+        mat3x3.col[0] = x
+        mat3x3.col[1] = y
+        mat3x3.col[2] = z
+        mat = mat3x3.to_4x4()
+        plane_obj.matrix_world = mat
+        plane_obj.location = plane_loc
+        plane_obj.scale = plane_scale
+
     def stream_processor(self, context, data_source, debug=False):
         # Constant parameters used in Aruco methods
         ARUCO_PARAMETERS = aruco.DetectorParameters_create()
@@ -136,7 +152,7 @@ class aruco_tracker():
         board = aruco.GridBoard_create(
                 markersX=3,
                 markersY=1,
-                markerLength=context.scene.cal_board_marker_separation,
+                markerLength=context.scene.cal_board_markerLength,
                 markerSeparation=0.0093,
                 dictionary=ARUCO_DICT)
         '''
@@ -229,8 +245,8 @@ class generate_calibration_board(bpy.types.Operator):
         board = aruco.CharucoBoard_create(
                 squaresX=context.scene.cal_board_X_num,
                 squaresY=context.scene.cal_board_Y_num,
-                squareLength=context.scene.cal_board_marker_length,
-                markerLength=context.scene.cal_board_marker_separation,
+                squareLength=context.scene.cal_board_squareLength,
+                markerLength=context.scene.cal_board_markerLength,
                 dictionary=context.scene.aruco_dict)
         print("generated calibration board")
         img = board.draw((context.scene.cal_board_X_res,context.scene.cal_board_Y_res))
@@ -271,8 +287,8 @@ class calibrate(bpy.types.Operator, ImportHelper):
         CHARUCO_BOARD = aruco.CharucoBoard_create(
                 squaresX=context.scene.cal_board_X_num,
                 squaresY=context.scene.cal_board_Y_num,
-                squareLength=context.scene.cal_board_marker_length,
-                markerLength=context.scene.cal_board_marker_separation,
+                squareLength=context.scene.cal_board_squareLength,
+                markerLength=context.scene.cal_board_markerLength,
                 dictionary=context.scene.aruco_dict)
         
         # Create the arrays and variables we'll use to store info like corners and IDs from images processed
@@ -313,7 +329,7 @@ class calibrate(bpy.types.Operator, ImportHelper):
 
             # If a Charuco board was found, let's collect image/corner points
             # Requiring at least 20 squares
-            if response > 20:
+            if response > 5:
                 # Add these corners and ids to our calibration arrays
                 corners_all.append(charuco_corners)
                 ids_all.append(charuco_ids)
@@ -433,7 +449,7 @@ class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
         #layout.label(text="Open Dental CAD Facebow Preferences:")
         row = layout.row()
         row = layout.row()
-        row.label(text="Calibration Board Setup")
+        row.label(text="Calibration Board Parameters")
         row = layout.row()
         row.label(text="Grid board resolution:")
         row.prop(context.scene, "cal_board_X_res")
@@ -443,8 +459,8 @@ class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
         row.prop(context.scene, "cal_board_X_num")
         row.prop(context.scene, "cal_board_Y_num")
         row = layout.row()
-        row.prop(context.scene, "cal_board_marker_length")
-        row.prop(context.scene, "cal_board_marker_separation")
+        row.prop(context.scene, "cal_board_squareLength")
+        row.prop(context.scene, "cal_board_markerLength")
         row = layout.row()
         row.operator("facebow.generate_aruco_board", text="Generate")
         row = layout.row()
@@ -504,6 +520,12 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row = layout.row()
             row.prop(context.scene, "pt_record")
         row = layout.row()
+        row.label(text="Frankfort Markers (3x):")
+        row.prop(context.scene, "frankfort_plane_points")
+        row = layout.row()
+        row.label(text="Frankfort Plane:")
+        row.prop(context.scene, "frankfork_plane_obj")
+        row = layout.row()
         row.operator("facebow.analyze")
 
 class ModalTimerOperator(bpy.types.Operator):
@@ -522,7 +544,10 @@ class ModalTimerOperator(bpy.types.Operator):
             while not context.scene.tracker_instance.queue.empty():
                 try:
                     data = context.scene.tracker_instance.queue.get_nowait()
-                    context.scene.tracker_instance.update_scene(context, data[0], data[1], data[2])
+                    context.scene.tracker_instance.update_tracking_marker(context, data[0], data[1], data[2])
+                    fpp = context.scene.frankfort_plane_points.split(",")
+                    fpp = [x.strip(' ') for x in fpp]
+                    context.scene.tracker_instance.update_point_plane(context, (bpy.data.objects[fpp[0]].location, bpy.data.objects[fpp[1]].location, bpy.data.objects[fpp[2]].location), context.scene.frankfork_plane_obj)
                 except queue.Empty: continue
                 context.scene.tracker_instance.queue.task_done()
 
@@ -552,22 +577,25 @@ def register():
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
 
+    bpy.types.Scene.frankfort_plane_points = bpy.props.StringProperty(name = "", description = "The 3 markers defining the Frankfort plane. Format ex.: 2,3,1", default = "")
+    bpy.types.Scene.frankfork_plane_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+
     bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=1920)
     bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=1080)
-    bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=60)
+    bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=120)
     bpy.types.Scene.CAMERA_BRIGHTNESS = bpy.props.IntProperty(name="Brightness:", description="", default=12)
     bpy.types.Scene.CAMERA_AUTO_EXPOSURE = bpy.props.BoolProperty(name="Auto Exposure", description="", default=False)
     bpy.types.Scene.CAMERA_EXPOSURE_VAL = bpy.props.IntProperty(name="Exposure:", description="", default=-6)
     bpy.types.Scene.CAMERA_AUTO_FOCUS = bpy.props.BoolProperty(name="Auto Focus", description="", default=False)
-    bpy.types.Scene.CAMERA_FOCUS_VAL = bpy.props.IntProperty(name="Focal Length (mm):", description="", default=18)
+    bpy.types.Scene.CAMERA_FOCUS_VAL = bpy.props.IntProperty(name="Focal Length (mm):", description="", default=90)
 
 
-    bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=4, min=1)
-    bpy.types.Scene.cal_board_Y_num = bpy.props.IntProperty(name="Height:", description="Number of markers arranged along the height.", default=5, min=1)
-    bpy.types.Scene.cal_board_X_res = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width.", default=864, min=800)
-    bpy.types.Scene.cal_board_Y_res = bpy.props.IntProperty(name="Height:", description="Number of markers arranged along the height.", default=1080, min=800)
-    bpy.types.Scene.cal_board_marker_length = bpy.props.FloatProperty(name="Marker length:", description="in cm", soft_min=0.00, default=3.75)
-    bpy.types.Scene.cal_board_marker_separation = bpy.props.FloatProperty(name="Marker separation:", description="in cm", soft_min=0.00, default=0.50)
+    bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width (x-axis).", default=4, min=1)
+    bpy.types.Scene.cal_board_Y_num = bpy.props.IntProperty(name="Height:", description="Number of markers arranged along the height (y-axis).", default=6, min=1)
+    bpy.types.Scene.cal_board_X_res = bpy.props.IntProperty(name="Width:", description="Board resolution along the width (for printing only).", default=864, min=800)
+    bpy.types.Scene.cal_board_Y_res = bpy.props.IntProperty(name="Height:", description="Board resolution along the height (for printing only).", default=1080, min=800)
+    bpy.types.Scene.cal_board_squareLength = bpy.props.FloatProperty(name="Checkered square length:", description="in meters", soft_min=0.00, default=0.044)
+    bpy.types.Scene.cal_board_markerLength = bpy.props.FloatProperty(name="Aruco marker lenght:", description="in meters", soft_min=0.00, default=0.02)
     bpy.types.Scene.facebow_marker_num = bpy.props.IntProperty(name="Number of markers:", description="Total number of markers to be generated for tracking.", default=4, min=1)
     bpy.types.Scene.facebow_marker_res = bpy.props.IntProperty(name="Marker size:", description="Tracking marker resolution.", default=700, min=100)
     
@@ -594,6 +622,9 @@ def unregister():
     del bpy.types.Scene.live_cam
     del bpy.types.Scene.pt_record
 
+    del bpy.types.Scene.frankfort_plane_points
+    del bpy.types.Scene.frankfork_plane_obj
+
     del bpy.types.Scene.FRAME_WIDTH
     del bpy.types.Scene.FRAME_HEIGHT
     del bpy.types.Scene.VIDEO_FPS
@@ -607,8 +638,8 @@ def unregister():
     del bpy.types.Scene.cal_board_Y_num
     del bpy.types.Scene.cal_board_X_res
     del bpy.types.Scene.cal_board_Y_res
-    del bpy.types.Scene.cal_board_marker_length
-    del bpy.types.Scene.cal_board_marker_separation
+    del bpy.types.Scene.cal_board_squareLength
+    del bpy.types.Scene.cal_board_markerLength
     del bpy.types.Scene.facebow_marker_num
     del bpy.types.Scene.facebow_marker_res
     
