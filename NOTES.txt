@@ -1,4 +1,4 @@
-C:\Program Files\Blender Foundation\Blender 2.83\2.83\python\bin>python.exe -m pip install --user --upgrade pip
+﻿C:\Program Files\Blender Foundation\Blender 2.83\2.83\python\bin>python.exe -m pip install --user --upgrade pip
 Collecting pip
   Downloading https://files.pythonhosted.org/packages/4e/5f/528232275f6509b1fff703c9280e58951a81abe24640905de621c9f81839/pip-20.2.3-py2.py3-none-any.whl (1.5MB)
     100% |████████████████████████████████| 1.5MB 6.4MB/s
@@ -31,3 +31,6 @@ Successfully installed opencv-contrib-python-4.4.0.42
 >>> exit()
 
 C:\Program Files\Blender Foundation\Blender 2.83\2.83\python\bin>
+
+make sure to have at least 1-2mm of white space around markers
+when calibrating, take pictures of the calibration board NOT with the camera but with the picture snapshot of the cam link feed

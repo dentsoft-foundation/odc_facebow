@@ -335,7 +335,7 @@ class calibrate(bpy.types.Operator, ImportHelper):
 
             # If a Charuco board was found, let's collect image/corner points
             # Requiring at least 20 squares
-            if response > 5:
+            if response > 10:
                 # Add these corners and ids to our calibration arrays
                 corners_all.append(charuco_corners)
                 ids_all.append(charuco_ids)
