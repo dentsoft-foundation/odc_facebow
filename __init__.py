@@ -115,6 +115,12 @@ class aruco_tracker():
         plane_obj.location = plane_loc
         plane_obj.scale = plane_scale
 
+    def update_vector_mag(self, context, point1, point2):
+        vec = point2 - point1
+        magnitude = vec.length * 1000.0 #convert from meters to mm
+        return magnitude, vec
+
+
     def stream_processor(self, context, data_source, debug=False):
         # Constant parameters used in Aruco methods
         ARUCO_PARAMETERS = aruco.DetectorParameters_create()
@@ -431,6 +437,10 @@ class analyze_data(bpy.types.Operator):
     bl_label = "Analyze"
 
     def execute(self, context):
+        bpy.context.object.rotation_mode = 'XYZ'
+        bpy.context.scene.unit_settings.system = 'METRIC'
+        bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
+
         if context.scene.live_cam == True:
             bpy.types.Scene.tracker_instance = aruco_tracker(context, debug=context.scene.debug_cv)
             bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
@@ -520,13 +530,25 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row = layout.row()
             row.prop(context.scene, "pt_record")
         row = layout.row()
-        row.label(text="Frankfort Markers (3x):")
-        row.prop(context.scene, "frankfort_plane_points")
+        row.label(text="Frankfort Markers:")
+        row = layout.row()
+        row.label(text="Posterior Left:")
+        row.prop(context.scene, "frankfort_plane_points_post_L")
+        row = layout.row()
+        row.label(text="Posterior Right:")
+        row.prop(context.scene, "frankfort_plane_points_post_R")
+        row = layout.row()
+        row.label(text="Anterior:")
+        row.prop(context.scene, "frankfort_plane_points_ant")
+        row = layout.row()
         row = layout.row()
         row.label(text="Frankfort Plane:")
         row.prop(context.scene, "frankfork_plane_obj")
         row = layout.row()
         row.operator("facebow.analyze")
+        row = layout.row()
+        row.label(text="Intercondylar Width:")
+        row.label(text=str(round(context.scene.condylar_width, 1))+" mm")
 
 class ModalTimerOperator(bpy.types.Operator):
     """Operator which runs its self from a timer"""
@@ -545,9 +567,8 @@ class ModalTimerOperator(bpy.types.Operator):
                 try:
                     data = context.scene.tracker_instance.queue.get_nowait()
                     context.scene.tracker_instance.update_tracking_marker(context, data[0], data[1], data[2])
-                    fpp = context.scene.frankfort_plane_points.split(",")
-                    fpp = [x.strip(' ') for x in fpp]
-                    context.scene.tracker_instance.update_point_plane(context, (bpy.data.objects[fpp[0]].location, bpy.data.objects[fpp[1]].location, bpy.data.objects[fpp[2]].location), context.scene.frankfork_plane_obj)
+                    context.scene.tracker_instance.update_point_plane(context, (context.scene.frankfort_plane_points_ant.location, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location), context.scene.frankfork_plane_obj)
+                    context.scene.condylar_width, vect = context.scene.tracker_instance.update_vector_mag(context, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location)
                 except queue.Empty: continue
                 context.scene.tracker_instance.queue.task_done()
 
@@ -577,8 +598,12 @@ def register():
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
 
-    bpy.types.Scene.frankfort_plane_points = bpy.props.StringProperty(name = "", description = "The 3 markers defining the Frankfort plane. Format ex.: 2,3,1", default = "")
+    bpy.types.Scene.frankfort_plane_points_post_L = bpy.props.PointerProperty(name = "", type=bpy.types.Object) #bpy.props.StringProperty(name = "", description = "The 3 markers defining the Frankfort plane. Format ex.: 2,3,1", default = "")
+    bpy.types.Scene.frankfort_plane_points_post_R = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+    bpy.types.Scene.frankfort_plane_points_ant = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
     bpy.types.Scene.frankfork_plane_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+
+    bpy.types.Scene.condylar_width = bpy.props.FloatProperty(name="", description="", default=0, min=0.0)
 
     bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=1920)
     bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=1080)
@@ -622,8 +647,12 @@ def unregister():
     del bpy.types.Scene.live_cam
     del bpy.types.Scene.pt_record
 
-    del bpy.types.Scene.frankfort_plane_points
+    del bpy.types.Scene.frankfort_plane_points_post_L
+    del bpy.types.Scene.frankfort_plane_points_post_R
+    del bpy.types.Scene.frankfort_plane_points_ant
     del bpy.types.Scene.frankfork_plane_obj
+
+    del bpy.types.Scene.condylar_width
 
     del bpy.types.Scene.FRAME_WIDTH
     del bpy.types.Scene.FRAME_HEIGHT
