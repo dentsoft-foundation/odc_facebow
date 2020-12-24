@@ -34,7 +34,7 @@ class aruco_tracker():
         self.processor_thread.start()
         self.queue = queue.Queue()
 
-    def update_tracking_marker(self, context, markerID, tvec, rvec):
+    def update_tracking_marker(self, context, marker_obj, tvec, rvec):
         # from https://www.learnopencv.com/rotation-matrix-to-euler-angles/
         # Checks if a matrix is a valid rotation matrix.
         def isRotationMatrix(R) :
@@ -80,16 +80,18 @@ class aruco_tracker():
         mat_rot_x = Matrix.Rotation(r_euler[0], 4, 'X')
         mat_rot_y = Matrix.Rotation(r_euler[1], 4, 'Y')
         mat_rot_z = Matrix.Rotation(r_euler[2], 4, 'Z')
-        bpy.data.objects[str(markerID)].matrix_world = mat_trans @ mat_rot_x @ mat_rot_y @ mat_rot_z @ mat_sca
+        marker_obj.matrix_world = mat_trans @ mat_rot_x @ mat_rot_y @ mat_rot_z @ mat_sca
         dg = context.evaluated_depsgraph_get()
         dg.update()
-        #print(markerID, final)
-        if bpy.data.objects.get(str(markerID)+"_trace") is None:
-            mesh = bpy.data.meshes.new(str(markerID)+"_trace_data")  # add a new mesh
-            obj = bpy.data.objects.new(str(markerID)+"_trace", mesh)  # add a new object using the mesh
+
+    def update_marker_tracing(self, context, marker_obj, tvec, rvec):
+        #print(markerID)
+        if bpy.data.objects.get(marker_obj.name +"_trace") is None:
+            mesh = bpy.data.meshes.new(marker_obj.name +"_trace_data")  # add a new mesh
+            obj = bpy.data.objects.new(marker_obj.name +"_trace", mesh)  # add a new object using the mesh
             bpy.context.scene.collection.objects.link(obj)  # put the object into the scene (link)
         else:
-            obj = bpy.data.objects.get(str(markerID)+"_trace")
+            obj = bpy.data.objects.get(marker_obj.name +"_trace")
         
         bm = bmesh.new()
         bm.from_mesh(obj.data)
@@ -432,9 +434,9 @@ class captured_patient_data(bpy.types.Operator, ImportHelper):
         context.scene.pt_record = self.filepath
         return {'FINISHED'}
 
-class analyze_data(bpy.types.Operator):
-    bl_idname = "facebow.analyze"
-    bl_label = "Analyze"
+class capture_input_data(bpy.types.Operator):
+    bl_idname = "facebow.capture_input"
+    bl_label = "Capture"
 
     def execute(self, context):
         bpy.context.object.rotation_mode = 'XYZ'
@@ -447,6 +449,14 @@ class analyze_data(bpy.types.Operator):
         else:
             bpy.types.Scene.tracker_instance = aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv)
             bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
+        return {'FINISHED'}
+
+class analyze_data(bpy.types.Operator):
+    bl_idname = "facebow.analyze"
+    bl_label = "Analyze"
+
+    def execute(self, context):
+        context.scene.analyze = True
         return {'FINISHED'}
 
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
@@ -530,6 +540,15 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row = layout.row()
             row.prop(context.scene, "pt_record")
         row = layout.row()
+        row.operator("facebow.capture_input")
+        row = layout.row()
+        for x in context.scene.marker_obj_list:
+            row = layout.row()
+            row.label(text="Marker #"+str(x.marker_id)+":")
+            row.prop(x, "b_obj")
+            row.prop(x, "trace_origin")
+            
+        row = layout.row()
         row.label(text="Frankfort Markers:")
         row = layout.row()
         row.label(text="Posterior Left:")
@@ -566,9 +585,16 @@ class ModalTimerOperator(bpy.types.Operator):
             while not context.scene.tracker_instance.queue.empty():
                 try:
                     data = context.scene.tracker_instance.queue.get_nowait()
-                    context.scene.tracker_instance.update_tracking_marker(context, data[0], data[1], data[2])
-                    context.scene.tracker_instance.update_point_plane(context, (context.scene.frankfort_plane_points_ant.location, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location), context.scene.frankfork_plane_obj)
-                    context.scene.condylar_width, vect = context.scene.tracker_instance.update_vector_mag(context, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location)
+                    markerID = data[0]
+                    if markerID not in [x.marker_id for x in context.scene.marker_obj_list]:
+                        context.scene.marker_obj_list.add().marker_id = markerID
+                    marker = [x for x in context.scene.marker_obj_list if x.marker_id == markerID][0]
+                    if context.scene.analyze == True and marker.b_obj is not None:
+                        context.scene.tracker_instance.update_tracking_marker(context, marker.b_obj, data[1], data[2])
+                        if marker.trace_origin == True:
+                            context.scene.tracker_instance.update_marker_tracing(context, marker.b_obj, data[1], data[2])
+                        context.scene.tracker_instance.update_point_plane(context, (context.scene.frankfort_plane_points_ant.location, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location), context.scene.frankfork_plane_obj)
+                        context.scene.condylar_width, vect = context.scene.tracker_instance.update_vector_mag(context, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location)
                 except queue.Empty: continue
                 context.scene.tracker_instance.queue.task_done()
 
@@ -586,6 +612,11 @@ class ModalTimerOperator(bpy.types.Operator):
         wm = context.window_manager
         wm.event_timer_remove(self._timer)
 
+class def_marker_obj_list(bpy.types.PropertyGroup):
+    marker_id = bpy.props.IntProperty()
+    b_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+    trace_origin = bpy.props.BoolProperty(name="", description="Enable location vertex tracing in separate mesh.", default=False)
+
 
 def register():
     bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=True)
@@ -602,6 +633,8 @@ def register():
     bpy.types.Scene.frankfort_plane_points_post_R = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
     bpy.types.Scene.frankfort_plane_points_ant = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
     bpy.types.Scene.frankfork_plane_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+
+    bpy.types.Scene.analyze = bpy.props.BoolProperty(default=False)
 
     bpy.types.Scene.condylar_width = bpy.props.FloatProperty(name="", description="", default=0, min=0.0)
 
@@ -631,9 +664,13 @@ def register():
     bpy.utils.register_class(calibrate)
     bpy.utils.register_class(load_config)
     bpy.utils.register_class(captured_patient_data)
+    bpy.utils.register_class(capture_input_data)
     bpy.utils.register_class(analyze_data)
 
     bpy.utils.register_class(ModalTimerOperator)
+
+    bpy.utils.register_class(def_marker_obj_list)
+    bpy.types.Scene.marker_obj_list = bpy.props.CollectionProperty(type=def_marker_obj_list)
 
 
 def unregister():
@@ -651,6 +688,8 @@ def unregister():
     del bpy.types.Scene.frankfort_plane_points_post_R
     del bpy.types.Scene.frankfort_plane_points_ant
     del bpy.types.Scene.frankfork_plane_obj
+
+    del bpy.types.Scene.analyze
 
     del bpy.types.Scene.condylar_width
 
@@ -679,9 +718,13 @@ def unregister():
     bpy.utils.unregister_class(calibrate)
     bpy.utils.unregister_class(load_config)
     bpy.utils.unregister_class(captured_patient_data)
+    bpy.utils.unregister_class(capture_input_data)
     bpy.utils.unregister_class(analyze_data)
 
     bpy.utils.unregister_class(ModalTimerOperator)
+
+    bpy.utils.unregister_class(def_marker_obj_list)
+    del bpy.types.Scene.marker_obj_list
 
 
 if __name__ == "__main__":

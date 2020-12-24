@@ -34,3 +34,4 @@ C:\Program Files\Blender Foundation\Blender 2.83\2.83\python\bin>
 
 make sure to have at least 1-2mm of white space around markers
 when calibrating, take pictures of the calibration board NOT with the camera but with the picture snapshot of the cam link feed
+the calibration board is rotated around a center axis with images capturing the different angles, camera is static
