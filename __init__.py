@@ -95,7 +95,9 @@ class aruco_tracker():
         
         bm = bmesh.new()
         bm.from_mesh(obj.data)
-        bm.verts.new((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+        #print(tvec, type(tvec))
+        if type(tvec) is not type(Vector()): bm.verts.new((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+        else: bm.verts.new(tvec)
         bm.verts.ensure_lookup_table()
         if len(bm.verts) > 1: bm.edges.new((bm.verts[-2], bm.verts[-1]))
         bm.to_mesh(obj.data)
@@ -459,6 +461,36 @@ class analyze_data(bpy.types.Operator):
         context.scene.analyze = True
         return {'FINISHED'}
 
+class analyze_condyles(bpy.types.Operator):
+    bl_idname = "facebow.analyze_condyles"
+    bl_label = "Analyze Condyles"
+
+    def execute(self, context):
+        if context.scene.mandibular_obj is not None and context.scene.frankfort_plane_enable is True:
+            r_condyle = context.scene.frankfort_plane_points_post_R.location
+            l_condyle = context.scene.frankfort_plane_points_post_L.location
+            if bpy.data.objects.get("L_condyle_trace") is None and bpy.data.objects.get("R_condyle_trace") is None:
+                bpy.ops.mesh.primitive_uv_sphere_add(radius=0.01, enter_editmode=False, align='WORLD', location=(0, 0, 0))
+                context.view_layer.objects.active.name = "L_condyle_trace"
+                bpy.data.objects["L_condyle_trace"].location = l_condyle
+                bpy.data.objects["L_condyle_trace"].constraints.new(type='CHILD_OF')
+                bpy.data.objects["L_condyle_trace"].constraints["Child Of"].target = context.scene.mandibular_obj
+                bpy.data.objects["L_condyle_trace"].constraints["Child Of"].inverse_matrix = bpy.data.objects["L_condyle_trace"].constraints["Child Of"].target.matrix_world.inverted()
+                bpy.ops.object.select_all(action='DESELECT')
+                context.view_layer.objects.active = None
+
+                bpy.ops.mesh.primitive_uv_sphere_add(radius=0.01, enter_editmode=False, align='WORLD', location=(0, 0, 0))
+                context.view_layer.objects.active.name = "R_condyle_trace"
+                bpy.data.objects["R_condyle_trace"].location = r_condyle
+                bpy.data.objects["R_condyle_trace"].constraints.new(type='CHILD_OF')
+                bpy.data.objects["R_condyle_trace"].constraints["Child Of"].target = context.scene.mandibular_obj
+                bpy.data.objects["R_condyle_trace"].constraints["Child Of"].inverse_matrix = bpy.data.objects["R_condyle_trace"].constraints["Child Of"].target.matrix_world.inverted()
+                bpy.ops.object.select_all(action='DESELECT')
+                context.view_layer.objects.active = None
+            else: pass
+
+        return {'FINISHED'}
+
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
     # this must match the add-on name, use '__package__'
     # when defining this in a submodule of a python package.
@@ -569,7 +601,18 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row.label(text="Intercondylar Width:")
             row.label(text=str(round(context.scene.condylar_width, 1))+" mm")
         row = layout.row()
+        row.label(text="Maxilla:")
+        row = layout.row()
+        row.prop(context.scene, "maxillary_obj")
+        row = layout.row()
+        row.label(text="Mandible:")
+        row = layout.row()
+        row.prop(context.scene, "mandibular_obj")
+        row = layout.row()
         row.operator("facebow.analyze")
+        if context.scene.frankfort_plane_enable == True and context.scene.analyze == True and context.scene.mandibular_obj is not None and context.scene.frankfort_plane_points_post_L is not None and context.scene.frankfort_plane_points_post_R is not None:
+            row = layout.row()
+            row.operator("facebow.analyze_condyles")
 
 class ModalTimerOperator(bpy.types.Operator):
     """Operator which runs its self from a timer"""
@@ -598,6 +641,9 @@ class ModalTimerOperator(bpy.types.Operator):
                         if context.scene.frankfort_plane_enable == True:
                             context.scene.tracker_instance.update_point_plane(context, (context.scene.frankfort_plane_points_ant.location, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location), context.scene.frankfork_plane_obj)
                             context.scene.condylar_width, vect = context.scene.tracker_instance.update_vector_mag(context, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location)
+                        if context.scene.mandibular_obj is not None and context.scene.frankfort_plane_enable == True and bpy.data.objects.get("R_condyle_trace") is not None and bpy.data.objects.get("L_condyle_trace") is not None:
+                            context.scene.tracker_instance.update_marker_tracing(context, bpy.data.objects.get("R_condyle_trace"), bpy.data.objects.get("R_condyle_trace").matrix_world.translation, None)
+                            context.scene.tracker_instance.update_marker_tracing(context, bpy.data.objects.get("L_condyle_trace"), bpy.data.objects.get("L_condyle_trace").matrix_world.translation, None)
                 except queue.Empty: continue
                 context.scene.tracker_instance.queue.task_done()
 
@@ -642,6 +688,9 @@ def register():
 
     bpy.types.Scene.condylar_width = bpy.props.FloatProperty(name="", description="", default=0, min=0.0)
 
+    bpy.types.Scene.maxillary_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+    bpy.types.Scene.mandibular_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+
     bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=1920)
     bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=1080)
     bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=120)
@@ -670,6 +719,7 @@ def register():
     bpy.utils.register_class(captured_patient_data)
     bpy.utils.register_class(capture_input_data)
     bpy.utils.register_class(analyze_data)
+    bpy.utils.register_class(analyze_condyles)
 
     bpy.utils.register_class(ModalTimerOperator)
 
@@ -698,6 +748,9 @@ def unregister():
 
     del bpy.types.Scene.condylar_width
 
+    del bpy.types.Scene.maxillary_obj
+    del bpy.types.Scene.mandibular_obj
+
     del bpy.types.Scene.FRAME_WIDTH
     del bpy.types.Scene.FRAME_HEIGHT
     del bpy.types.Scene.VIDEO_FPS
@@ -725,6 +778,7 @@ def unregister():
     bpy.utils.unregister_class(captured_patient_data)
     bpy.utils.unregister_class(capture_input_data)
     bpy.utils.unregister_class(analyze_data)
+    bpy.utils.unregister_class(analyze_condyles)
 
     bpy.utils.unregister_class(ModalTimerOperator)
 
