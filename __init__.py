@@ -29,12 +29,14 @@ except ModuleNotFoundError as e:
     except ModuleNotFoundError as e: print("Failed to pip install dependencies!")
 
 class aruco_tracker():
-    def __init__(self, context, data_source=cv2.CAP_DSHOW, debug=False):
-        self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source, debug))
-        self.processor_thread.start()
+    def __init__(self, context, data_source=cv2.CAP_DSHOW, debug=False, process_in_main=False):
+        if process_in_main is False:
+            self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source, debug))
+            self.processor_thread.start()
         self.queue = queue.Queue()
 
-    def update_tracking_marker(self, context, marker_obj, tvec, rvec):
+
+    def update_tracking_marker(self, context, marker_obj, tvec, rvec, current_frame):
         # from https://www.learnopencv.com/rotation-matrix-to-euler-angles/
         # Checks if a matrix is a valid rotation matrix.
         def isRotationMatrix(R) :
@@ -83,15 +85,22 @@ class aruco_tracker():
         marker_obj.matrix_world = mat_trans @ mat_rot_x @ mat_rot_y @ mat_rot_z @ mat_sca
         dg = context.evaluated_depsgraph_get()
         dg.update()
+        if current_frame is not None:
+            marker_obj.keyframe_insert("location", frame = current_frame)
 
-    def update_marker_tracing(self, context, marker_obj, tvec, rvec):
+    def update_marker_tracing(self, context, marker_obj, tvec, rvec, current_frame):
         #print(markerID)
         if bpy.data.objects.get(marker_obj.name +"_trace") is None:
             mesh = bpy.data.meshes.new(marker_obj.name +"_trace_data")  # add a new mesh
             obj = bpy.data.objects.new(marker_obj.name +"_trace", mesh)  # add a new object using the mesh
+            bpy.ops.object.empty_add(type='PLAIN_AXES', align='WORLD', location=(0, 0, 0))
+            bpy.context.view_layer.objects.active.name = marker_obj.name + "_tracker"
+            keyframe_tracking = bpy.context.view_layer.objects.active
             bpy.context.scene.collection.objects.link(obj)  # put the object into the scene (link)
+            bpy.context.scene.collection.objects.link(keyframe_tracking)
         else:
             obj = bpy.data.objects.get(marker_obj.name +"_trace")
+            keyframe_tracking = bpy.data.objects.get(marker_obj.name +"_tracker")
         
         bm = bmesh.new()
         bm.from_mesh(obj.data)
@@ -102,6 +111,16 @@ class aruco_tracker():
         if len(bm.verts) > 1: bm.edges.new((bm.verts[-2], bm.verts[-1]))
         bm.to_mesh(obj.data)
         bm.free()
+
+        if type(tvec) is not type(Vector()): keyframe_tracking.location = (float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))
+        else: keyframe_tracking.location = tvec
+        
+        dg = context.evaluated_depsgraph_get()
+        dg.update()
+        #bpy.context.view_layer.update()
+
+        if current_frame is not None:
+            keyframe_tracking.keyframe_insert("location", frame = current_frame)
 
     def update_point_plane(self, context, point_vecs, plane_obj):
         plane_scale = plane_obj.scale.copy()
@@ -125,7 +144,7 @@ class aruco_tracker():
         return magnitude, vec
 
 
-    def stream_processor(self, context, data_source, debug=False):
+    def stream_processor(self, context, data_source, debug=False, source='video'):
         # Constant parameters used in Aruco methods
         ARUCO_PARAMETERS = aruco.DetectorParameters_create()
         ARUCO_DICT = context.scene.aruco_dict
@@ -133,41 +152,45 @@ class aruco_tracker():
 
         # Create vectors we'll be using for rotations and translations for postures
         rvecs, tvecs = None, None
+        if source == 'video':
+            cap = cv2.VideoCapture(data_source)
+            #cam = cv2.VideoCapture("1.mp4")
+            # codec = 0x47504A4D # MJPG
+            # codec = 844715353.0 # YUY2
 
-        cap = cv2.VideoCapture(data_source)
-        #cam = cv2.VideoCapture("1.mp4")
-        # codec = 0x47504A4D # MJPG
-        # codec = 844715353.0 # YUY2
+            codec = 0x47504A4D # MJPG
+            cap.set(cv2.CAP_PROP_FOURCC, codec)
 
-        codec = 0x47504A4D # MJPG
-        cap.set(cv2.CAP_PROP_FOURCC, codec)
-
-        if data_source == cv2.CAP_DSHOW:
-            cap.set(3, context.scene.FRAME_WIDTH) #3. CV_CAP_PROP_FRAME_WIDTH Width of the frames in the video stream.
-            cap.set(4, context.scene.FRAME_HEIGHT) #4. CV_CAP_PROP_FRAME_HEIGHT Height of the frames in the video stream.
-            cap.set(10, context.scene.CAMERA_BRIGHTNESS) #10. CV_CAP_PROP_BRIGHTNESS Brightness of the image (only for cameras).
-            cap.set(5, context.scene.VIDEO_FPS) #5. CV_CAP_PROP_FPS Frame rate.
-            if context.scene.CAMERA_AUTO_EXPOSURE == False:
-                cap.set(21, 0) #PROP_AUTO_EXPOSURE =21; 0 = OFF/FALSE
-                cap.set(15, context.scene.CAMERA_EXPOSURE_VAL) #CV_CAP_PROP_EXPOSURE
-            elif context.scene.CAMERA_AUTO_EXPOSURE == True:
-                cap.set(21, 1)
-            if context.scene.CAMERA_AUTO_FOCUS == False:
-                cap.set(39, 0) #CAP_PROP_AUTOFOCUS =39
-                cap.set(28, context.scene.CAMERA_FOCUS_VAL) #CAP_PROP_FOCUS =28
-            elif context.scene.CAMERA_AUTO_FOCUS == True:
-                cap.set(39, 1)
-        
-        '''
-        board = aruco.GridBoard_create(
-                markersX=3,
-                markersY=1,
-                markerLength=context.scene.cal_board_markerLength,
-                markerSeparation=0.0093,
-                dictionary=ARUCO_DICT)
-        '''
+            if data_source == cv2.CAP_DSHOW:
+                cap.set(3, context.scene.FRAME_WIDTH) #3. CV_CAP_PROP_FRAME_WIDTH Width of the frames in the video stream.
+                cap.set(4, context.scene.FRAME_HEIGHT) #4. CV_CAP_PROP_FRAME_HEIGHT Height of the frames in the video stream.
+                cap.set(10, context.scene.CAMERA_BRIGHTNESS) #10. CV_CAP_PROP_BRIGHTNESS Brightness of the image (only for cameras).
+                cap.set(5, context.scene.VIDEO_FPS) #5. CV_CAP_PROP_FPS Frame rate.
+                if context.scene.CAMERA_AUTO_EXPOSURE == False:
+                    cap.set(21, 0) #PROP_AUTO_EXPOSURE =21; 0 = OFF/FALSE
+                    cap.set(15, context.scene.CAMERA_EXPOSURE_VAL) #CV_CAP_PROP_EXPOSURE
+                elif context.scene.CAMERA_AUTO_EXPOSURE == True:
+                    cap.set(21, 1)
+                if context.scene.CAMERA_AUTO_FOCUS == False:
+                    cap.set(39, 0) #CAP_PROP_AUTOFOCUS =39
+                    cap.set(28, context.scene.CAMERA_FOCUS_VAL) #CAP_PROP_FOCUS =28
+                elif context.scene.CAMERA_AUTO_FOCUS == True:
+                    cap.set(39, 1)
+            
+            '''
+            board = aruco.GridBoard_create(
+                    markersX=3,
+                    markersY=1,
+                    markerLength=context.scene.cal_board_markerLength,
+                    markerSeparation=0.0093,
+                    dictionary=ARUCO_DICT)
+            '''
         while True:
-            success, img = cap.read()
+            current_frame = None
+            if source == 'video':
+                success, img = cap.read()
+                current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+            if source == 'img': img = cv2.imread(data_source)
             imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
             #imgBlur = cv2.GaussianBlur(imgGrey,(11,11),cv2.BORDER_DEFAULT)
             #imgPyrDown = cv2.pyrDown(imgGrey)
@@ -191,7 +214,7 @@ class aruco_tracker():
                     cv2.aruco.drawDetectedMarkers(img,corners,ids)
                     aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
 
-                    self.queue.put([ids[i][0], tvec, rvec])
+                    self.queue.put([ids[i][0], tvec, rvec, current_frame])
                 
             if debug == True:
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
@@ -200,6 +223,7 @@ class aruco_tracker():
                 #cv2.imshow("PyrDown", imgPyrDown)
                 if cv2.waitKey(1) & 0xFF ==ord('q'):
                     break
+            if source == 'img': break
         if debug == True: cv2.destroyAllWindows()
         #self.processor_thread.join()
 
@@ -421,6 +445,40 @@ class load_config(bpy.types.Operator, ImportHelper):
 
         return {'FINISHED'}
 
+class captured_patient_data_images(bpy.types.Operator, ImportHelper):
+    bl_idname = "facebow.input_images"
+    bl_label = "Select Image Records"
+
+    filter_glob: bpy.props.StringProperty(default='*.*', options={'HIDDEN'})
+
+    files = bpy.props.CollectionProperty(
+            name="File Path",
+            type=bpy.types.OperatorFileListElement,
+            )
+    directory = bpy.props.StringProperty(
+            subtype='DIR_PATH',
+            )
+
+
+    def execute(self, context):
+        """Do something with the selected file(s)."""
+
+        directory = self.directory
+        for file_elem in self.files:
+            filepath = os.path.join(directory, file_elem.name)
+            print(filepath)
+        context.scene.pt_record = directory
+
+        images = glob.glob(self.directory+'*.jpg')
+
+        # Loop through images glob'ed
+        bpy.types.Scene.tracker_instance = aruco_tracker(context, None, context.scene.debug_cv, True)
+        for iname in images:
+            bpy.types.Scene.tracker_instance.stream_processor(context, iname, context.scene.debug_cv, 'img')
+        bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
+        return {'FINISHED'}
+
+
 class captured_patient_data(bpy.types.Operator, ImportHelper):
     bl_idname = "facebow.input"
     bl_label = "Select Record"
@@ -441,7 +499,7 @@ class capture_input_data(bpy.types.Operator):
     bl_label = "Capture"
 
     def execute(self, context):
-        bpy.context.object.rotation_mode = 'XYZ'
+        #bpy.context.object.rotation_mode = 'XYZ'
         bpy.context.scene.unit_settings.system = 'METRIC'
         bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
 
@@ -478,7 +536,13 @@ class analyze_condyles(bpy.types.Operator):
                 bpy.data.objects["L_condyle_trace"].constraints["Child Of"].inverse_matrix = bpy.data.objects["L_condyle_trace"].constraints["Child Of"].target.matrix_world.inverted()
                 bpy.ops.object.select_all(action='DESELECT')
                 context.view_layer.objects.active = None
-
+                '''
+                bpy.ops.object.empty_add(type='PLAIN_AXES', align='WORLD', location=(0, 0, 0))
+                bpy.context.view_layer.objects.active.name = "L_condyle_tracker"
+                bpy.data.objects["L_condyle_tracker"].location = l_condyle
+                bpy.ops.object.select_all(action='DESELECT')
+                context.view_layer.objects.active = None
+                '''
                 bpy.ops.mesh.primitive_uv_sphere_add(radius=0.01, enter_editmode=False, align='WORLD', location=(0, 0, 0))
                 context.view_layer.objects.active.name = "R_condyle_trace"
                 bpy.data.objects["R_condyle_trace"].location = r_condyle
@@ -487,9 +551,57 @@ class analyze_condyles(bpy.types.Operator):
                 bpy.data.objects["R_condyle_trace"].constraints["Child Of"].inverse_matrix = bpy.data.objects["R_condyle_trace"].constraints["Child Of"].target.matrix_world.inverted()
                 bpy.ops.object.select_all(action='DESELECT')
                 context.view_layer.objects.active = None
+                '''
+                bpy.ops.object.empty_add(type='PLAIN_AXES', align='WORLD', location=(0, 0, 0))
+                bpy.context.view_layer.objects.active.name = "R_condyle_tracker"
+                bpy.data.objects["R_condyle_tracker"].location = r_condyle
+                bpy.ops.object.select_all(action='DESELECT')
+                context.view_layer.objects.active = None
+                '''
             else: pass
 
         return {'FINISHED'}
+
+# https://github.com/4webmaster4/BD_Jaw_Tracker/blob/9fffdba6190a20f0767b292949e84624d529978c/Operators/BDJawTracker_Operators.py#L829
+class smooth_keyframes(bpy.types.Operator):
+    """ """
+
+    bl_idname = "facebow.smoothkeyframes"
+    bl_label = "Smooth selected object's keyframes"
+
+    def execute(self, context):
+        active_obj = bpy.context.view_layer.objects.active
+
+        current_area = bpy.context.area.type
+        layer = bpy.context.view_layer
+
+        # change to graph editor
+        bpy.context.area.type = "GRAPH_EDITOR"
+
+        # smooth curves of all selected bones
+        bpy.ops.graph.decimate(mode='RATIO', remove_ratio=0.75, remove_error_margin=10)
+        bpy.ops.graph.smooth()
+
+        # switch back to original area
+        bpy.context.area.type = current_area                                    
+        bpy.ops.object.select_all(action='DESELECT')
+
+        return {"FINISHED"}
+
+
+class show_keyframe_path(bpy.types.Operator):
+    """ """
+
+    bl_idname = "facebow.keyframe_path"
+    bl_label = "Show motion path"
+
+    def execute(self, context):
+        scene = bpy.context.scene
+        active_object = bpy.context.selected_objects
+        bpy.ops.object.paths_calculate(start_frame=scene.frame_start, end_frame=scene.frame_end-5)
+
+        return {"FINISHED"}
+
 
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
     # this must match the add-on name, use '__package__'
@@ -570,6 +682,8 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row = layout.row()
             row.operator("facebow.input")
             row = layout.row()
+            row.operator("facebow.input_images")
+            row = layout.row()
             row.prop(context.scene, "pt_record")
         row = layout.row()
         row.operator("facebow.capture_input")
@@ -580,6 +694,10 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row.prop(x, "b_obj")
             row.prop(x, "trace_origin")
             
+        row = layout.row()
+        row.operator("facebow.smoothkeyframes")
+        row = layout.row()
+        row.operator("facebow.keyframe_path")
         row = layout.row()
         row.label(text="Frankfort Plane:")
         row.prop(context.scene, "frankfort_plane_enable")
@@ -635,15 +753,15 @@ class ModalTimerOperator(bpy.types.Operator):
                         context.scene.marker_obj_list.add().marker_id = markerID
                     marker = [x for x in context.scene.marker_obj_list if x.marker_id == markerID][0]
                     if context.scene.analyze == True and marker.b_obj is not None:
-                        context.scene.tracker_instance.update_tracking_marker(context, marker.b_obj, data[1], data[2])
+                        context.scene.tracker_instance.update_tracking_marker(context, marker.b_obj, data[1], data[2], data[3])
                         if marker.trace_origin == True:
-                            context.scene.tracker_instance.update_marker_tracing(context, marker.b_obj, data[1], data[2])
+                            context.scene.tracker_instance.update_marker_tracing(context, marker.b_obj, data[1], data[2], data[3])
                         if context.scene.frankfort_plane_enable == True:
                             context.scene.tracker_instance.update_point_plane(context, (context.scene.frankfort_plane_points_ant.location, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location), context.scene.frankfork_plane_obj)
                             context.scene.condylar_width, vect = context.scene.tracker_instance.update_vector_mag(context, context.scene.frankfort_plane_points_post_R.location, context.scene.frankfort_plane_points_post_L.location)
                         if context.scene.mandibular_obj is not None and context.scene.frankfort_plane_enable == True and bpy.data.objects.get("R_condyle_trace") is not None and bpy.data.objects.get("L_condyle_trace") is not None:
-                            context.scene.tracker_instance.update_marker_tracing(context, bpy.data.objects.get("R_condyle_trace"), bpy.data.objects.get("R_condyle_trace").matrix_world.translation, None)
-                            context.scene.tracker_instance.update_marker_tracing(context, bpy.data.objects.get("L_condyle_trace"), bpy.data.objects.get("L_condyle_trace").matrix_world.translation, None)
+                            context.scene.tracker_instance.update_marker_tracing(context, bpy.data.objects.get("R_condyle_trace"), bpy.data.objects.get("R_condyle_trace").matrix_world.translation, None, data[3])
+                            context.scene.tracker_instance.update_marker_tracing(context, bpy.data.objects.get("L_condyle_trace"), bpy.data.objects.get("L_condyle_trace").matrix_world.translation, None, data[3])
                 except queue.Empty: continue
                 context.scene.tracker_instance.queue.task_done()
 
@@ -717,9 +835,12 @@ def register():
     bpy.utils.register_class(calibrate)
     bpy.utils.register_class(load_config)
     bpy.utils.register_class(captured_patient_data)
+    bpy.utils.register_class(captured_patient_data_images)
     bpy.utils.register_class(capture_input_data)
     bpy.utils.register_class(analyze_data)
     bpy.utils.register_class(analyze_condyles)
+    bpy.utils.register_class(smooth_keyframes)
+    bpy.utils.register_class(show_keyframe_path)
 
     bpy.utils.register_class(ModalTimerOperator)
 
@@ -776,9 +897,12 @@ def unregister():
     bpy.utils.unregister_class(calibrate)
     bpy.utils.unregister_class(load_config)
     bpy.utils.unregister_class(captured_patient_data)
+    bpy.utils.unregister_class(captured_patient_data_images)
     bpy.utils.unregister_class(capture_input_data)
     bpy.utils.unregister_class(analyze_data)
     bpy.utils.unregister_class(analyze_condyles)
+    bpy.utils.unregister_class(smooth_keyframes)
+    bpy.utils.unregister_class(show_keyframe_path)
 
     bpy.utils.unregister_class(ModalTimerOperator)
 
