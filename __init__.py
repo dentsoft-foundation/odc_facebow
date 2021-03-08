@@ -98,6 +98,10 @@ class aruco_tracker():
             keyframe_tracking = bpy.context.view_layer.objects.active
             bpy.context.scene.collection.objects.link(obj)  # put the object into the scene (link)
             bpy.context.scene.collection.objects.link(keyframe_tracking)
+            sg = bpy.data.collections.new(marker_obj.name +tracing_name)
+            bpy.context.scene.collection.children.link(sg)
+            sg.objects.link(obj)
+            sg.objects.link(keyframe_tracking)
         else:
             obj = bpy.data.objects.get(marker_obj.name +tracing_name)
             keyframe_tracking = bpy.data.objects.get(marker_obj.name + tracing_name+"_tracker")
@@ -753,7 +757,7 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row = layout.row()
             row.operator("facebow.analyze_condyles")
 
-        if bpy.context.active_object.animation_data.action.fcurves is not None:
+        if bpy.context.active_object.animation_data is not None and bpy.context.active_object.animation_data.action.fcurves is not None:
             row = layout.row()
             row.label(text="Motion Segmentation")
             row = layout.row()
