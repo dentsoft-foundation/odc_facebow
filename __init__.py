@@ -88,19 +88,19 @@ class aruco_tracker():
         if current_frame is not None:
             marker_obj.keyframe_insert("location", frame = current_frame)
 
-    def update_marker_tracing(self, context, marker_obj, tvec, rvec, current_frame):
+    def update_marker_tracing(self, context, marker_obj, tvec, rvec, current_frame, tracing_name = "_trace"):
         #print(markerID)
-        if bpy.data.objects.get(marker_obj.name +"_trace") is None:
-            mesh = bpy.data.meshes.new(marker_obj.name +"_trace_data")  # add a new mesh
-            obj = bpy.data.objects.new(marker_obj.name +"_trace", mesh)  # add a new object using the mesh
+        if bpy.data.objects.get(marker_obj.name +tracing_name) is None:
+            mesh = bpy.data.meshes.new(marker_obj.name +tracing_name+"_data")  # add a new mesh
+            obj = bpy.data.objects.new(marker_obj.name +tracing_name, mesh)  # add a new object using the mesh
             bpy.ops.object.empty_add(type='PLAIN_AXES', align='WORLD', location=(0, 0, 0))
-            bpy.context.view_layer.objects.active.name = marker_obj.name + "_tracker"
+            bpy.context.view_layer.objects.active.name = marker_obj.name + tracing_name + "_tracker"
             keyframe_tracking = bpy.context.view_layer.objects.active
             bpy.context.scene.collection.objects.link(obj)  # put the object into the scene (link)
             bpy.context.scene.collection.objects.link(keyframe_tracking)
         else:
-            obj = bpy.data.objects.get(marker_obj.name +"_trace")
-            keyframe_tracking = bpy.data.objects.get(marker_obj.name +"_tracker")
+            obj = bpy.data.objects.get(marker_obj.name +tracing_name)
+            keyframe_tracking = bpy.data.objects.get(marker_obj.name + tracing_name+"_tracker")
         
         bm = bmesh.new()
         bm.from_mesh(obj.data)
@@ -602,6 +602,27 @@ class show_keyframe_path(bpy.types.Operator):
 
         return {"FINISHED"}
 
+class segment_keyframes(bpy.types.Operator):
+    """ """
+
+    bl_idname = "facebow.segment_actionpath"
+    bl_label = "Segment Path"
+
+    def execute(self, context):
+        obj = context.active_object
+        curves = context.active_object.animation_data.action.fcurves
+        dpath = obj.path_from_id("location")
+        fc = curves.find(dpath, index=0)
+        for k in fc.keyframe_points:
+            fr = k.co[0]
+            context.scene.frame_set(fr)
+            #pos=obj.location
+            #print(pos)
+            if context.scene.keyframe_segment_start <= fr and context.scene.keyframe_segment_end >= fr:
+                context.scene.tracker_instance.update_marker_tracing(context, obj, obj.matrix_world.translation, None, fr, context.scene.keyframe_segment_name)
+
+        return {"FINISHED"}
+
 
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
     # this must match the add-on name, use '__package__'
@@ -732,6 +753,20 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row = layout.row()
             row.operator("facebow.analyze_condyles")
 
+        if bpy.context.active_object.animation_data.action.fcurves is not None:
+            row = layout.row()
+            row.label(text="Motion Segmentation")
+            row = layout.row()
+            row.label(text="Keyframes: ")
+            row.prop(context.scene, "keyframe_segment_start")
+            row.prop(context.scene, "keyframe_segment_end")
+            row = layout.row()
+            row.prop(context.scene, "keyframe_segment_name")
+            row = layout.row()
+            row.operator("facebow.segment_actionpath")
+
+
+
 class ModalTimerOperator(bpy.types.Operator):
     """Operator which runs its self from a timer"""
     bl_idname = "wm.modal_timer_operator"
@@ -809,6 +844,10 @@ def register():
     bpy.types.Scene.maxillary_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
     bpy.types.Scene.mandibular_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
 
+    bpy.types.Scene.keyframe_segment_start = bpy.props.IntProperty(name="", description="", default=0)
+    bpy.types.Scene.keyframe_segment_end = bpy.props.IntProperty(name="", description="", default=250)
+    bpy.types.Scene.keyframe_segment_name = bpy.props.StringProperty(name = "Segment Name: ", description = "", default = "")
+
     bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=1920)
     bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=1080)
     bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=120)
@@ -841,6 +880,7 @@ def register():
     bpy.utils.register_class(analyze_condyles)
     bpy.utils.register_class(smooth_keyframes)
     bpy.utils.register_class(show_keyframe_path)
+    bpy.utils.register_class(segment_keyframes)
 
     bpy.utils.register_class(ModalTimerOperator)
 
@@ -871,6 +911,10 @@ def unregister():
 
     del bpy.types.Scene.maxillary_obj
     del bpy.types.Scene.mandibular_obj
+
+    del bpy.types.Scene.keyframe_segment_start
+    del bpy.types.Scene.keyframe_segment_end
+    del bpy.types.Scene.keyframe_segment_name
 
     del bpy.types.Scene.FRAME_WIDTH
     del bpy.types.Scene.FRAME_HEIGHT
@@ -903,6 +947,7 @@ def unregister():
     bpy.utils.unregister_class(analyze_condyles)
     bpy.utils.unregister_class(smooth_keyframes)
     bpy.utils.unregister_class(show_keyframe_path)
+    bpy.utils.unregister_class(segment_keyframes)
 
     bpy.utils.unregister_class(ModalTimerOperator)
 
