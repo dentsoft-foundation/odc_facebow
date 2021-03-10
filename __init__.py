@@ -731,8 +731,14 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row.label(text="Posterior Left:")
             row.prop(context.scene, "frankfort_plane_points_post_L")
             row = layout.row()
+            row.prop(context.scene, "L_condyle_offset")
+            row.prop(context.scene, "L_condyle_offset_axis")
+            row = layout.row()
             row.label(text="Posterior Right:")
             row.prop(context.scene, "frankfort_plane_points_post_R")
+            row = layout.row()
+            row.prop(context.scene, "R_condyle_offset")
+            row.prop(context.scene, "R_condyle_offset_axis")
             row = layout.row()
             row.label(text="Anterior:")
             row.prop(context.scene, "frankfort_plane_points_ant")
@@ -837,7 +843,11 @@ def register():
 
     bpy.types.Scene.frankfort_plane_enable = bpy.props.BoolProperty(name="", description="Enable the Frankfort Plane tracking.", default=False)
     bpy.types.Scene.frankfort_plane_points_post_L = bpy.props.PointerProperty(name = "", type=bpy.types.Object) #bpy.props.StringProperty(name = "", description = "The 3 markers defining the Frankfort plane. Format ex.: 2,3,1", default = "")
+    bpy.types.Scene.L_condyle_offset = bpy.props.FloatProperty(name="Offset", description="Offset amount in mm. Use pre-fix negative sign to invert axis direction", default=0)
+    bpy.types.Scene.L_condyle_offset_axis = bpy.props.EnumProperty(name="", items=[ ('X', "X-Axis", ""),('Y', "Y-Axis", ""),('Z', "Z-Axis", "")])
     bpy.types.Scene.frankfort_plane_points_post_R = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
+    bpy.types.Scene.R_condyle_offset = bpy.props.FloatProperty(name="Offset", description="Offset amount in mm. Use pre-fix negative sign to invert axis direction", default=0)
+    bpy.types.Scene.R_condyle_offset_axis = bpy.props.EnumProperty(name="", items=[ ('X', "X-Axis", ""),('Y', "Y-Axis", ""),('Z', "Z-Axis", "")])
     bpy.types.Scene.frankfort_plane_points_ant = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
     bpy.types.Scene.frankfork_plane_obj = bpy.props.PointerProperty(name = "", type=bpy.types.Object)
 
@@ -905,7 +915,11 @@ def unregister():
 
     del bpy.types.Scene.frankfort_plane_enable
     del bpy.types.Scene.frankfort_plane_points_post_L
+    del bpy.types.Scene.L_condyle_offset
+    del bpy.types.Scene.L_condyle_offset_axis
     del bpy.types.Scene.frankfort_plane_points_post_R
+    del bpy.types.Scene.R_condyle_offset
+    del bpy.types.Scene.R_condyle_offset_axis
     del bpy.types.Scene.frankfort_plane_points_ant
     del bpy.types.Scene.frankfork_plane_obj
 
