@@ -436,6 +436,8 @@ class load_config(bpy.types.Operator, ImportHelper):
     filter_glob: bpy.props.StringProperty(default='*.pckl', options={'HIDDEN'})
 
     def execute(self, context):
+        bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
+        bpy.context.scene.unit_settings.scale_length = 0.001
         filename, extension = os.path.splitext(self.filepath)
         print('Selected file:', self.filepath)
         print('File name:', filename)
@@ -535,6 +537,12 @@ class analyze_condyles(bpy.types.Operator):
                 bpy.ops.mesh.primitive_uv_sphere_add(radius=0.01, enter_editmode=False, align='WORLD', location=(0, 0, 0))
                 context.view_layer.objects.active.name = "L_condyle_trace"
                 bpy.data.objects["L_condyle_trace"].location = l_condyle
+                if context.scene.L_condyle_offset_axis == 'X':
+                    bpy.ops.transform.translate(value=(context.scene.L_condyle_offset/1000,0,0), orient_type='LOCAL')
+                elif context.scene.L_condyle_offset_axis == 'Y':
+                    bpy.ops.transform.translate(value=(0,context.scene.L_condyle_offset/1000,0), orient_type='LOCAL')
+                elif context.scene.L_condyle_offset_axis == 'Z':
+                    bpy.ops.transform.translate(value=(0,0,context.scene.L_condyle_offset/1000), orient_type='LOCAL') 
                 bpy.data.objects["L_condyle_trace"].constraints.new(type='CHILD_OF')
                 bpy.data.objects["L_condyle_trace"].constraints["Child Of"].target = context.scene.mandibular_obj
                 bpy.data.objects["L_condyle_trace"].constraints["Child Of"].inverse_matrix = bpy.data.objects["L_condyle_trace"].constraints["Child Of"].target.matrix_world.inverted()
@@ -550,6 +558,12 @@ class analyze_condyles(bpy.types.Operator):
                 bpy.ops.mesh.primitive_uv_sphere_add(radius=0.01, enter_editmode=False, align='WORLD', location=(0, 0, 0))
                 context.view_layer.objects.active.name = "R_condyle_trace"
                 bpy.data.objects["R_condyle_trace"].location = r_condyle
+                if context.scene.R_condyle_offset_axis == 'X':
+                    bpy.ops.transform.translate(value=(context.scene.R_condyle_offset/1000,0,0), orient_type='LOCAL')
+                elif context.scene.R_condyle_offset_axis == 'Y':
+                    bpy.ops.transform.translate(value=(0,context.scene.R_condyle_offset/1000,0), orient_type='LOCAL')
+                elif context.scene.R_condyle_offset_axis == 'Z':
+                    bpy.ops.transform.translate(value=(0,0,context.scene.R_condyle_offset/1000), orient_type='LOCAL') 
                 bpy.data.objects["R_condyle_trace"].constraints.new(type='CHILD_OF')
                 bpy.data.objects["R_condyle_trace"].constraints["Child Of"].target = context.scene.mandibular_obj
                 bpy.data.objects["R_condyle_trace"].constraints["Child Of"].inverse_matrix = bpy.data.objects["R_condyle_trace"].constraints["Child Of"].target.matrix_world.inverted()
