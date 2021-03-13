@@ -196,11 +196,11 @@ class aruco_tracker():
                 current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
             if source == 'img': img = cv2.imread(data_source)
             imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-            #imgBlur = cv2.GaussianBlur(imgGrey,(11,11),cv2.BORDER_DEFAULT)
+            imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
             #imgPyrDown = cv2.pyrDown(imgGrey)
 
             # lists of ids and the corners beloning to each id
-            corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
+            corners, ids, rejected_img_points = aruco.detectMarkers(imgBlur, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
             #for one in rejected_img_points:
             #    more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
             
@@ -216,7 +216,7 @@ class aruco_tracker():
                     #print(ids)
                     
                     cv2.aruco.drawDetectedMarkers(img,corners,ids)
-                    aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.02)  # Draw Axis
+                    aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.05)  # Draw Axis
 
                     self.queue.put([ids[i][0], tvec, rvec, current_frame])
                 
@@ -597,7 +597,7 @@ class smooth_keyframes(bpy.types.Operator):
         bpy.context.area.type = "GRAPH_EDITOR"
 
         # smooth curves of all selected bones
-        bpy.ops.graph.decimate(mode='RATIO', remove_ratio=0.75, remove_error_margin=10)
+        bpy.ops.graph.decimate(mode='RATIO', remove_ratio=0.9, remove_error_margin=50)
         bpy.ops.graph.smooth()
 
         # switch back to original area
@@ -847,7 +847,7 @@ class def_marker_obj_list(bpy.types.PropertyGroup):
 def register():
     bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=True)
 
-    bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11)
+    bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11) # https://www.pyimagesearch.com/2020/12/14/generating-aruco-markers-with-opencv-and-python/
     bpy.types.Scene.cameraMatrix = None
     bpy.types.Scene.distCoeffs = None
     bpy.types.Scene.tracker_instance = None
