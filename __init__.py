@@ -30,10 +30,13 @@ except ModuleNotFoundError as e:
 
 class aruco_tracker():
     def __init__(self, context, data_source=cv2.CAP_DSHOW, debug=False, process_in_main=False):
-        if process_in_main is False:
-            self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source, debug))
-            self.processor_thread.start()
-        self.queue = queue.Queue()
+        if context.scene.legacy_file is False:
+            if process_in_main is False:
+                self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source, debug))
+                self.processor_thread.start()
+            self.queue = queue.Queue()
+        else:
+            self.stream_processor(context, data_source, debug, 'video')
 
 
     def update_tracking_marker(self, context, marker_obj, tvec, rvec, current_frame):
@@ -189,11 +192,14 @@ class aruco_tracker():
                     markerSeparation=0.0093,
                     dictionary=ARUCO_DICT)
             '''
+        if context.scene.legacy_file is True:
+            f = open(os.path.join(context.scene.legacy_dir, 'data_stream.txt'), "w")
         while True:
             current_frame = None
             if source == 'video':
                 success, img = cap.read()
                 current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
             if source == 'img': img = cv2.imread(data_source)
             imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
             imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
@@ -215,20 +221,26 @@ class aruco_tracker():
                     #print(ids[i], tvec[0][0])
                     #print(ids)
                     
-                    cv2.aruco.drawDetectedMarkers(img,corners,ids)
-                    aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.05)  # Draw Axis
-
-                    self.queue.put([ids[i][0], tvec, rvec, current_frame])
+                    cv2.aruco.drawDetectedMarkers(imgBlur,corners,ids)
+                    aruco.drawAxis(imgBlur, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.05)  # Draw Axis
+                    if context.scene.legacy_file is False: self.queue.put([ids[i][0], tvec, rvec, current_frame])
+                    elif context.scene.legacy_file is True:
+                        f.write(str([ids[i][0], tvec.tolist(), rvec.tolist(), current_frame])+"\n")
                 
             if debug == True:
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
                 #cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
-                cv2.imshow("img", img)
+                cv2.imshow("img", imgBlur)
                 #cv2.imshow("PyrDown", imgPyrDown)
                 if cv2.waitKey(1) & 0xFF ==ord('q'):
                     break
+            if current_frame == total_frames:
+                cv2.destroyAllWindows()
+                break
             if source == 'img': break
+            
         if debug == True: cv2.destroyAllWindows()
+        if context.scene.legacy_file is True: f.close()
         #self.processor_thread.join()
 
 bl_info = {
@@ -436,8 +448,9 @@ class load_config(bpy.types.Operator, ImportHelper):
     filter_glob: bpy.props.StringProperty(default='*.pckl', options={'HIDDEN'})
 
     def execute(self, context):
+        bpy.context.scene.unit_settings.system = 'METRIC'
         bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
-        bpy.context.scene.unit_settings.scale_length = 0.001
+        #bpy.context.scene.unit_settings.scale_length = 0.001
         filename, extension = os.path.splitext(self.filepath)
         print('Selected file:', self.filepath)
         print('File name:', filename)
@@ -509,12 +522,24 @@ class capture_input_data(bpy.types.Operator):
         bpy.context.scene.unit_settings.system = 'METRIC'
         bpy.context.scene.unit_settings.length_unit = 'MILLIMETERS'
 
-        if context.scene.live_cam == True:
-            bpy.types.Scene.tracker_instance = aruco_tracker(context, debug=context.scene.debug_cv)
-            bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
-        else:
-            bpy.types.Scene.tracker_instance = aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv)
-            bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
+        if context.scene.legacy_file is False:
+            if context.scene.live_cam == True:
+                bpy.types.Scene.tracker_instance = aruco_tracker(context, debug=context.scene.debug_cv)
+                bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
+            else:
+                bpy.types.Scene.tracker_instance = aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv)
+                bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
+        elif context.scene.legacy_file is True:
+            bpy.types.Scene.tracker_instance = aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv, True)
+            with open(os.path.join(context.scene.legacy_dir, 'data_stream.txt'), 'r') as reader:
+                # Read and print the entire file line by line
+                while True:  # The EOF char is an empty string
+                    line = reader.readline()
+                    if not line:
+                        break
+                    data = eval(line)
+                    print(data)
+                    context.scene.tracker_instance.update_tracking_marker(context, bpy.data.objects.get(str(data[0])), data[1], data[2], data[3]) # structure -> [ids[i][0], tvec, rvec, current_frame]
         return {'FINISHED'}
 
 class analyze_data(bpy.types.Operator):
@@ -597,7 +622,7 @@ class smooth_keyframes(bpy.types.Operator):
         bpy.context.area.type = "GRAPH_EDITOR"
 
         # smooth curves of all selected bones
-        bpy.ops.graph.decimate(mode='RATIO', remove_ratio=0.9, remove_error_margin=50)
+        bpy.ops.graph.decimate(mode='RATIO', remove_ratio=0.75, remove_error_margin=0)
         bpy.ops.graph.smooth()
 
         # switch back to original area
@@ -846,6 +871,8 @@ class def_marker_obj_list(bpy.types.PropertyGroup):
 
 def register():
     bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=True)
+    bpy.types.Scene.legacy_file = bpy.props.BoolProperty(name="Legacy Process", description="Processes data via OpenCV, saved to a file then read into keyframes.", default=True)
+    bpy.types.Scene.legacy_dir = os.path.dirname(os.path.abspath(__file__))
 
     bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11) # https://www.pyimagesearch.com/2020/12/14/generating-aruco-markers-with-opencv-and-python/
     bpy.types.Scene.cameraMatrix = None
@@ -918,6 +945,8 @@ def register():
 
 def unregister():
     del bpy.types.Scene.debug_cv
+    del bpy.types.Scene.legacy_file
+    del bpy.types.Scene.legacy_dir
 
     del bpy.types.Scene.aruco_dict
     del bpy.types.Scene.cameraMatrix
