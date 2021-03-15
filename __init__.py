@@ -164,6 +164,17 @@ class aruco_tracker():
         ARUCO_PARAMETERS = aruco.DetectorParameters_create()
         ARUCO_DICT = context.scene.aruco_dict
         ARUCO_PARAMETERS.cornerRefinementMethod = aruco.CORNER_REFINE_APRILTAG
+        ARUCO_PARAMETERS.aprilTagDeglitch = 0           
+        ARUCO_PARAMETERS.aprilTagMinWhiteBlackDiff = 30
+        ARUCO_PARAMETERS.aprilTagMaxLineFitMse = 20
+        ARUCO_PARAMETERS.aprilTagCriticalRad = 0.1745329201221466 *6
+        ARUCO_PARAMETERS.aprilTagMinClusterPixels = 5  
+        ARUCO_PARAMETERS.maxErroneousBitsInBorderRate = 0.35
+        ARUCO_PARAMETERS.errorCorrectionRate = 1.0                    
+        ARUCO_PARAMETERS.minMarkerPerimeterRate = 0.05                  
+        ARUCO_PARAMETERS.maxMarkerPerimeterRate = 4                  
+        ARUCO_PARAMETERS.polygonalApproxAccuracyRate = 0.05
+        ARUCO_PARAMETERS.minCornerDistanceRate = 0.05
 
         # Create vectors we'll be using for rotations and translations for postures
         rvecs, tvecs = None, None
@@ -630,7 +641,7 @@ class smooth_keyframes(bpy.types.Operator):
         bpy.context.area.type = "GRAPH_EDITOR"
 
         # smooth curves of all selected bones
-        bpy.ops.graph.decimate(mode='RATIO', remove_ratio=0.75, remove_error_margin=0)
+        bpy.ops.graph.decimate(mode='RATIO', remove_ratio=0.25, remove_error_margin=0)
         bpy.ops.graph.smooth()
 
         # switch back to original area
