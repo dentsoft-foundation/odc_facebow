@@ -1,3 +1,11 @@
+'''
+NOTES:
+Calibrate on floor at fixed focal length (auto focus, then set lens to manual. macro lenses have no zoom).
+Take from many angles as possible, even if board is partially visible or up close
+POOR LIGHTING AND BLURRINESS can lead to failure to properly calibrate
+when recording/tracking patient movements, don't let the marker be normal to camera view... openCV has difficulty w/ estimating position along z-axis (the axis facing the camera) causing jitter. tilt patient head slightly at an angle so marker is facing directly the camera
+'''
+
 import os, sys, shutil, threading, queue
 import pickle, glob
 import numpy as np
