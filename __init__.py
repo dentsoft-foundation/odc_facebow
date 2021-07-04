@@ -298,9 +298,45 @@ class generate_tracking_marker(bpy.types.Operator):
         # Create an image from the marker
         # second param is ID number
         # last param is total image size
-        for i in range(0, context.scene.facebow_marker_num):
-            img = aruco.drawMarker(context.scene.aruco_dict, i, context.scene.facebow_marker_res)
+        for i in range(0, context.scene.manual_marker_num):
+            img = aruco.drawMarker(context.scene.aruco_dict, i, context.scene.manual_marker_res)
             cv2.imwrite(os.path.join(folder, str(i)+".jpg"), img)
+        return {'FINISHED'}
+
+class generate_aruco_marker_board(bpy.types.Operator):
+    bl_idname = "facebow.generate_aruco_appliance_board"
+    bl_label = "Generate Appliances' Markers"
+
+    def execute(self, context):
+        folder = "C:/Users/talmazovg/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow"
+        if "markers" not in os.listdir(folder):
+            try: os.mkdir(folder+"/markers")
+            except FileExistsError as e: print("Marker dir exists!")
+        folder += "/markers"
+        print(folder)
+
+        for filename in os.listdir(folder):
+            file_path = os.path.join(folder, filename)
+            try:
+                if os.path.isfile(file_path) or os.path.islink(file_path):
+                    os.unlink(file_path)
+                elif os.path.isdir(file_path):
+                    shutil.rmtree(file_path)
+            except Exception as e:
+                print('Failed to delete %s. Reason: %s' % (file_path, e))
+        # Create an image from the marker
+        # second param is ID number
+        # last param is total image size
+        gridboard = aruco.GridBoard_create(
+                markersX=3, 
+                markersY=3, 
+                markerLength=0.04, 
+                markerSeparation=0.01, 
+                dictionary=context.scene.aruco_dict)
+
+        # Create an image from the gridboard
+        img = gridboard.draw(outSize=(context.scene.cal_board_X_res,context.scene.cal_board_Y_res))
+        cv2.imwrite(os.path.join(folder,"test_gridboard.jpg"), img)
         return {'FINISHED'}
 
 class generate_calibration_board(bpy.types.Operator):
@@ -712,12 +748,15 @@ class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
         row.operator("facebow.generate_aruco_board", text="Generate")
         row = layout.row()
         row = layout.row()
-        row.label(text="Markers Setup")
+        row.label(text="Manual Markers Setup")
         row = layout.row()
-        row.prop(context.scene, "facebow_marker_num")
-        row.prop(context.scene, "facebow_marker_res")
+        row.prop(context.scene, "manual_marker_num")
+        row.prop(context.scene, "manual_marker_res")
         row = layout.row()
         row.operator("facebow.generate_aruco_marker", text="Generate")
+        row.label(text="Appliances' Markers Setup")
+        row = layout.row()
+        row.operator("facebow.generate_aruco_appliance_board", text="Generate")
         row = layout.row()
         row.prop(context.scene, "debug_cv")
         row = layout.row()
@@ -938,12 +977,13 @@ def register():
     bpy.types.Scene.cal_board_Y_res = bpy.props.IntProperty(name="Height:", description="Board resolution along the height (for printing only).", default=1080, min=800)
     bpy.types.Scene.cal_board_squareLength = bpy.props.FloatProperty(name="Checkered square length:", description="in meters", soft_min=0.00, default=0.044)
     bpy.types.Scene.cal_board_markerLength = bpy.props.FloatProperty(name="Aruco marker lenght:", description="in meters", soft_min=0.00, default=0.02)
-    bpy.types.Scene.facebow_marker_num = bpy.props.IntProperty(name="Number of markers:", description="Total number of markers to be generated for tracking.", default=4, min=1)
-    bpy.types.Scene.facebow_marker_res = bpy.props.IntProperty(name="Marker size:", description="Tracking marker resolution.", default=700, min=100)
+    bpy.types.Scene.manual_marker_num = bpy.props.IntProperty(name="Number of markers:", description="Total number of markers to be generated for tracking.", default=4, min=1)
+    bpy.types.Scene.manual_marker_res = bpy.props.IntProperty(name="Marker size:", description="Tracking marker resolution.", default=700, min=100)
     
     bpy.utils.register_class(ODC_Facebow_Preferences)
     bpy.utils.register_class(ODC_Facebow_Panel)
     bpy.utils.register_class(generate_tracking_marker)
+    bpy.utils.register_class(generate_aruco_marker_board)
     bpy.utils.register_class(generate_calibration_board)
     bpy.utils.register_class(calibrate)
     bpy.utils.register_class(load_config)
@@ -1011,12 +1051,13 @@ def unregister():
     del bpy.types.Scene.cal_board_Y_res
     del bpy.types.Scene.cal_board_squareLength
     del bpy.types.Scene.cal_board_markerLength
-    del bpy.types.Scene.facebow_marker_num
-    del bpy.types.Scene.facebow_marker_res
+    del bpy.types.Scene.manual_marker_num
+    del bpy.types.Scene.manual_marker_res
     
     bpy.utils.unregister_class(ODC_Facebow_Preferences)
     bpy.utils.unregister_class(ODC_Facebow_Panel)
     bpy.utils.unregister_class(generate_tracking_marker)
+    bpy.utils.unregister_class(generate_aruco_marker_board)
     bpy.utils.unregister_class(generate_calibration_board)
     bpy.utils.unregister_class(calibrate)
     bpy.utils.unregister_class(load_config)
