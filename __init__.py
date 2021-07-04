@@ -98,6 +98,7 @@ class aruco_tracker():
         dg.update()
         if current_frame is not None:
             marker_obj.keyframe_insert("location", frame = current_frame)
+            marker_obj.keyframe_insert("rotation_euler", frame = current_frame)
 
     def update_marker_tracing(self, context, marker_obj, tvec, rvec, current_frame, tracing_name = "_trace"):
         #print(markerID)
@@ -219,7 +220,10 @@ class aruco_tracker():
                 success, img = cap.read()
                 current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
                 total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if source == 'img': img = cv2.imread(data_source)
+            if source == 'img':
+                current_frame = 0
+                total_frames = 0
+                img = cv2.imread(data_source)
             imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
             imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
             #imgPyrDown = cv2.pyrDown(imgGrey)
@@ -929,7 +933,7 @@ class def_marker_obj_list(bpy.types.PropertyGroup):
 
 def register():
     bpy.types.Scene.debug_cv = bpy.props.BoolProperty(name="Show openCV", description="Shows openCV aruco tracker window. May cause add-on instability.", default=True)
-    bpy.types.Scene.legacy_file = bpy.props.BoolProperty(name="Legacy Process", description="Processes data via OpenCV, saved to a file then read into keyframes.", default=True)
+    bpy.types.Scene.legacy_file = bpy.props.BoolProperty(name="Legacy Process", description="Processes data via OpenCV, saved to a file then read into keyframes.", default=False)
     bpy.types.Scene.legacy_dir = os.path.dirname(os.path.abspath(__file__))
 
     bpy.types.Scene.aruco_dict = aruco.Dictionary_get(aruco.DICT_APRILTAG_36h11) # https://www.pyimagesearch.com/2020/12/14/generating-aruco-markers-with-opencv-and-python/
