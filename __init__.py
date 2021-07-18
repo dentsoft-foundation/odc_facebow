@@ -1,10 +1,4 @@
-'''
-NOTES:
-Calibrate on floor at fixed focal length (auto focus, then set lens to manual. macro lenses have no zoom).
-Take from many angles as possible, even if board is partially visible or up close
-POOR LIGHTING AND BLURRINESS can lead to failure to properly calibrate
-when recording/tracking patient movements, don't let the marker be normal to camera view... openCV has difficulty w/ estimating position along z-axis (the axis facing the camera) causing jitter. tilt patient head slightly at an angle so marker is facing directly the camera
-'''
+
 
 import os, sys, shutil, threading, queue
 import pickle, glob
@@ -87,7 +81,7 @@ class aruco_tracker():
         #https://docs.blender.org/api/current/mathutils.html
         # https://docs.blender.org/api/current/mathutils.html#mathutils.Matrix
         # create an identitiy matrix
-        mat_sca = Matrix.Scale(0.01, 4)
+        mat_sca = Matrix.Scale(0.001, 4)
         mat_trans = Matrix.Translation((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
         # https://devtalk.blender.org/t/understanding-matrix-operations-in-blender/10148
         mat_rot_x = Matrix.Rotation(r_euler[0], 4, 'X')
@@ -214,6 +208,17 @@ class aruco_tracker():
             '''
         if context.scene.legacy_file is True:
             f = open(os.path.join(context.scene.legacy_dir, 'data_stream.txt'), "w")
+
+        if  context.scene.use_pose_board is True:
+            # create the opencv pose board object by indicating which IDs are grouped together
+            anterior_ids = np.array([[0], [1], [2]], dtype=np.int32)
+            anterior_board = aruco.Board_create(context.scene.pose_board_local_co, ARUCO_DICT, anterior_ids)
+            left_ids = np.array([[3], [4], [5]], dtype=np.int32)
+            left_board = aruco.Board_create(context.scene.pose_board_local_co, ARUCO_DICT, left_ids)
+            right_ids = np.array([[6], [7], [8]], dtype=np.int32)
+            right_board = aruco.Board_create(context.scene.pose_board_local_co, ARUCO_DICT, right_ids)
+            MarkersIdCornersDict = dict()
+
         while True:
             current_frame = None
             if source == 'video':
@@ -225,35 +230,101 @@ class aruco_tracker():
                 total_frames = 0
                 img = cv2.imread(data_source)
             imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-            imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
+            #imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
             #imgPyrDown = cv2.pyrDown(imgGrey)
 
             # lists of ids and the corners beloning to each id
-            corners, ids, rejected_img_points = aruco.detectMarkers(imgBlur, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
+            corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
             #for one in rejected_img_points:
             #    more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
             
             # Outline all of the markers detected in our image
             
             if np.all(ids is not None):  # If there are markers found by detector
-                for i in range(0, len(ids)):  # Iterate in markers
-                    # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
-                    rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i], 0.021, context.scene.cameraMatrix, context.scene.distCoeffs) 
-                    (rvec - tvec).any()  # get rid of that nasty numpy value array error
-                                
-                    #print(ids[i], tvec[0][0])
-                    #print(ids)
-                    
-                    cv2.aruco.drawDetectedMarkers(imgBlur,corners,ids)
-                    aruco.drawAxis(imgBlur, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.05)  # Draw Axis
-                    if context.scene.legacy_file is False: self.queue.put([ids[i][0], tvec, rvec, current_frame])
-                    elif context.scene.legacy_file is True:
-                        f.write(str([ids[i][0], tvec.tolist(), rvec.tolist(), current_frame])+"\n")
+                if  context.scene.use_pose_board is True:
+                    if ids is not None and len(ids) >= 9:
+                        for i in range(0, len(ids)):  # Iterate in markers
+                            MarkersIdCornersDict[ids[i][0]] = (list(corners))[i]
+
+                        anterior_corners = [
+                            MarkersIdCornersDict[0],
+                            MarkersIdCornersDict[1],
+                            MarkersIdCornersDict[2],
+                        ]
+                        left_corners = [
+                            MarkersIdCornersDict[3],
+                            MarkersIdCornersDict[4],
+                            MarkersIdCornersDict[5],
+                        ]
+                        right_corners = [
+                            MarkersIdCornersDict[6],
+                            MarkersIdCornersDict[7],
+                            MarkersIdCornersDict[8],
+                        ]
+
+                        # Estimate the posture of the board, which is a construction of 3D space based on the 2D video
+                        ant_retval, ant_rvec, ant_tvec = cv2.aruco.estimatePoseBoard(
+                            anterior_corners,
+                            anterior_ids,
+                            anterior_board,
+                            context.scene.cameraMatrix,
+                            context.scene.distCoeffs,
+                            None,
+                            None,
+                        )
+                        if ant_retval:
+                            self.queue.put([0, ant_tvec, ant_rvec, current_frame])
+                            img = aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, ant_rvec, ant_tvec, 0.05)
+
+                        L_retval, L_rvec, L_tvec = cv2.aruco.estimatePoseBoard(
+                            left_corners,
+                            left_ids,
+                            left_board,
+                            context.scene.cameraMatrix,
+                            context.scene.distCoeffs,
+                            None,
+                            None,
+                        )
+                        if L_retval:
+                            self.queue.put([1, L_tvec, L_rvec, current_frame])
+                            img = aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, L_rvec, L_tvec, 0.05)
+
+                        R_retval, R_rvec, R_tvec = cv2.aruco.estimatePoseBoard(
+                            right_corners,
+                            right_ids,
+                            right_board,
+                            context.scene.cameraMatrix,
+                            context.scene.distCoeffs,
+                            None,
+                            None,
+                        )
+                        if R_retval:
+                            self.queue.put([2, R_tvec, R_rvec, current_frame])
+                            img = aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, R_rvec, R_tvec, 0.05)
+                        img = cv2.aruco.drawDetectedMarkers(img, corners, ids, (0,255,0))    
+                        
+                else:
+                    for i in range(0, len(ids)):  # Iterate in markers
+                        # Estimate pose of each marker and return the values rvec and tvec---different from camera coefficients
+                        rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i], context.scene.cal_board_markerLength, context.scene.cameraMatrix, context.scene.distCoeffs) 
+                        (rvec - tvec).any()  # get rid of that nasty numpy value array error
+                                    
+                        #print(ids[i], tvec[0][0])
+                        #print(ids)
+                        
+                        cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
+                        aruco.drawAxis(imgGrey, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.05)  # Draw Axis
+                        if context.scene.legacy_file is False: self.queue.put([ids[i][0], tvec, rvec, current_frame])
+                        elif context.scene.legacy_file is True:
+                            f.write(str([ids[i][0], tvec.tolist(), rvec.tolist(), current_frame])+"\n")
                 
             if debug == True:
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
                 #cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
-                cv2.imshow("img", imgBlur)
+
+                #cv2.imshow("img", imgGrey)
+                cv2.imshow("img", img)
+
                 #cv2.imshow("PyrDown", imgPyrDown)
                 if cv2.waitKey(1) & 0xFF ==ord('q'):
                     break
@@ -283,7 +354,7 @@ class generate_tracking_marker(bpy.types.Operator):
     bl_label = "Generate Tracking Marker"
 
     def execute(self, context):
-        folder = "C:/Users/talmazovg/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow"
+        folder = "C:/Users/Mayotic/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow"
         if "markers" not in os.listdir(folder):
             try: os.mkdir(folder+"/markers")
             except FileExistsError as e: print("Marker dir exists!")
@@ -312,7 +383,7 @@ class generate_calibration_board(bpy.types.Operator):
     bl_label = "Generate Calibration Board"
 
     def execute(self, context):
-        folder = "C:/Users/talmazovg/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow"
+        folder = "C:/Users/Mayotic/AppData/Roaming/Blender Foundation/Blender/2.83/scripts/addons/odc_facebow"
         print(folder)
         #aruco_dict = aruco.getPredefinedDictionary(aruco.DICT_6X6_1000 )
         board = aruco.CharucoBoard_create(
@@ -901,6 +972,7 @@ def register():
     bpy.types.Scene.cameraMatrix = None
     bpy.types.Scene.distCoeffs = None
     bpy.types.Scene.tracker_instance = None
+    bpy.types.Scene.use_pose_board = bpy.props.BoolProperty(name="Use Pose Board", description="Use a group of markers to estimate position. Use of multiple markers increases accuracy.", default=True) #true during research
 
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
@@ -938,12 +1010,13 @@ def register():
 
     bpy.types.Scene.cal_board_X_num = bpy.props.IntProperty(name="Width:", description="Number of markers arranged along the width (x-axis).", default=4, min=1)
     bpy.types.Scene.cal_board_Y_num = bpy.props.IntProperty(name="Height:", description="Number of markers arranged along the height (y-axis).", default=6, min=1)
-    bpy.types.Scene.cal_board_X_res = bpy.props.IntProperty(name="Width:", description="Board resolution along the width (for printing only).", default=864, min=800)
-    bpy.types.Scene.cal_board_Y_res = bpy.props.IntProperty(name="Height:", description="Board resolution along the height (for printing only).", default=1080, min=800)
-    bpy.types.Scene.cal_board_squareLength = bpy.props.FloatProperty(name="Checkered square length:", description="in meters", soft_min=0.00, default=0.044)
-    bpy.types.Scene.cal_board_markerLength = bpy.props.FloatProperty(name="Aruco marker lenght:", description="in meters", soft_min=0.00, default=0.02)
-    bpy.types.Scene.facebow_marker_num = bpy.props.IntProperty(name="Number of markers:", description="Total number of markers to be generated for tracking.", default=4, min=1)
-    bpy.types.Scene.facebow_marker_res = bpy.props.IntProperty(name="Marker size:", description="Tracking marker resolution.", default=700, min=100)
+    #Equivalent A4 paper dimensions in pixels at 300 DPI and 72 DPI respectively are: 2480 pixels x 3508 pixels (print resolution)
+    bpy.types.Scene.cal_board_X_res = bpy.props.IntProperty(name="Width:", description="Board resolution along the width (for printing only).", default=2480, min=800)
+    bpy.types.Scene.cal_board_Y_res = bpy.props.IntProperty(name="Height:", description="Board resolution along the height (for printing only).", default=3508, min=800)
+    bpy.types.Scene.cal_board_squareLength = bpy.props.FloatProperty(name="Checkered square length:", description="in meters", soft_min=0.00, default=0.04)
+    bpy.types.Scene.cal_board_markerLength = bpy.props.FloatProperty(name="Aruco marker lenght:", description="in meters", soft_min=0.00, default=0.03)
+    bpy.types.Scene.facebow_marker_num = bpy.props.IntProperty(name="Number of markers:", description="Total number of markers to be generated for tracking.", default=9, min=1)
+    bpy.types.Scene.facebow_marker_res = bpy.props.IntProperty(name="Marker size:", description="Tracking marker resolution.", default=1000, min=100)
     
     bpy.utils.register_class(ODC_Facebow_Preferences)
     bpy.utils.register_class(ODC_Facebow_Panel)
@@ -965,6 +1038,36 @@ def register():
     bpy.utils.register_class(def_marker_obj_list)
     bpy.types.Scene.marker_obj_list = bpy.props.CollectionProperty(type=def_marker_obj_list)
 
+    ##############################################################################################
+    bpy.types.Scene.pose_board_local_co = [
+        np.array(
+            [
+                [0, 0.04125, 0.085417],
+                [0, -0.04125, 0.085417],
+                [0, -0.04125, 0.05625],
+                [0, 0.04125, 0.05625]
+            ],
+            dtype=np.float32,
+        ),
+        np.array(
+            [
+                [0, 0.04125, 0.05125],
+                [0, -0.04125, 0.05125],
+                [0, -0.04125, 0.019583],
+                [0, 0.04125, 0.019583]
+            ],
+            dtype=np.float32,
+        ),
+        np.array(
+            [
+                [0, 0.04125, 0.014583],
+                [0, -0.04125, 0.014583],
+                [0, -0.04125, -0.014583],
+                [0, 0.04125, -0.014583]
+            ],
+            dtype=np.float32,
+        ),
+    ]
 
 def unregister():
     del bpy.types.Scene.debug_cv
@@ -975,6 +1078,7 @@ def unregister():
     del bpy.types.Scene.cameraMatrix
     del bpy.types.Scene.distCoeffs
     del bpy.types.Scene.tracker_instance
+    del bpy.types.Scene.use_pose_board
 
     del bpy.types.Scene.live_cam
     del bpy.types.Scene.pt_record
@@ -1037,6 +1141,8 @@ def unregister():
 
     bpy.utils.unregister_class(def_marker_obj_list)
     del bpy.types.Scene.marker_obj_list
+
+    del bpy.types.Scene.pose_board_local_co
 
 
 if __name__ == "__main__":
