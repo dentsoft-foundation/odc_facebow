@@ -82,7 +82,9 @@ class aruco_tracker():
         # https://docs.blender.org/api/current/mathutils.html#mathutils.Matrix
         # create an identitiy matrix
         mat_sca = Matrix.Scale(0.001, 4)
-        mat_trans = Matrix.Translation((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+        print(tvec)
+        
+        mat_trans = Matrix.Translation((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0]))) #structure on single markers -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))) #structure when doing POSE [[-0.20874319], [-0.13054966], [ 0.98599982]] - >((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])))
         # https://devtalk.blender.org/t/understanding-matrix-operations-in-blender/10148
         mat_rot_x = Matrix.Rotation(r_euler[0], 4, 'X')
         mat_rot_y = Matrix.Rotation(r_euler[1], 4, 'Y')
@@ -115,14 +117,14 @@ class aruco_tracker():
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         #print(tvec, type(tvec))
-        if type(tvec) is not type(Vector()): bm.verts.new((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+        if type(tvec) is not type(Vector()): bm.verts.new((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0]))) #single marker -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
         else: bm.verts.new(tvec)
         bm.verts.ensure_lookup_table()
         if len(bm.verts) > 1: bm.edges.new((bm.verts[-2], bm.verts[-1]))
         bm.to_mesh(obj.data)
         bm.free()
 
-        if type(tvec) is not type(Vector()): keyframe_tracking.location = (float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))
+        if type(tvec) is not type(Vector()): keyframe_tracking.location = (float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])) #single marker -> (float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))
         else: keyframe_tracking.location = tvec
         
         dg = context.evaluated_depsgraph_get()
@@ -235,6 +237,7 @@ class aruco_tracker():
 
             # lists of ids and the corners beloning to each id
             corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
+            cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
             #for one in rejected_img_points:
             #    more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
             
@@ -274,7 +277,7 @@ class aruco_tracker():
                         )
                         if ant_retval:
                             self.queue.put([0, ant_tvec, ant_rvec, current_frame])
-                            img = aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, ant_rvec, ant_tvec, 0.05)
+                            imgGrey = aruco.drawAxis(imgGrey, context.scene.cameraMatrix, context.scene.distCoeffs, ant_rvec, ant_tvec, 0.05)
 
                         L_retval, L_rvec, L_tvec = cv2.aruco.estimatePoseBoard(
                             left_corners,
@@ -287,7 +290,7 @@ class aruco_tracker():
                         )
                         if L_retval:
                             self.queue.put([1, L_tvec, L_rvec, current_frame])
-                            img = aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, L_rvec, L_tvec, 0.05)
+                            imgGrey = aruco.drawAxis(imgGrey, context.scene.cameraMatrix, context.scene.distCoeffs, L_rvec, L_tvec, 0.05)
 
                         R_retval, R_rvec, R_tvec = cv2.aruco.estimatePoseBoard(
                             right_corners,
@@ -300,8 +303,8 @@ class aruco_tracker():
                         )
                         if R_retval:
                             self.queue.put([2, R_tvec, R_rvec, current_frame])
-                            img = aruco.drawAxis(img, context.scene.cameraMatrix, context.scene.distCoeffs, R_rvec, R_tvec, 0.05)
-                        img = cv2.aruco.drawDetectedMarkers(img, corners, ids, (0,255,0))    
+                            imgGrey = aruco.drawAxis(imgGrey, context.scene.cameraMatrix, context.scene.distCoeffs, R_rvec, R_tvec, 0.05)
+                        imgGrey = cv2.aruco.drawDetectedMarkers(imgGrey, corners, ids, (0,255,0))    
                         
                 else:
                     for i in range(0, len(ids)):  # Iterate in markers
@@ -322,8 +325,8 @@ class aruco_tracker():
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
                 #cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
 
-                #cv2.imshow("img", imgGrey)
-                cv2.imshow("img", img)
+                cv2.imshow("img", imgGrey)
+                #cv2.imshow("img", img)
 
                 #cv2.imshow("PyrDown", imgPyrDown)
                 if cv2.waitKey(1) & 0xFF ==ord('q'):
