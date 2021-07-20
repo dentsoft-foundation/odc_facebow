@@ -799,6 +799,50 @@ class segment_keyframes(bpy.types.Operator):
 
         return {"FINISHED"}
 
+class calc_cond_angle(bpy.types.Operator):
+    """ """
+
+    bl_idname = "facebow.calc_condyle_angle"
+    bl_label = "Calculate"
+
+    def execute(self, context):
+        marker_obj = context.active_object
+        context.scene.frankfork_plane_obj.data.vertices[0].co
+        points = np.array([
+            context.scene.frankfork_plane_obj.data.vertices[0].co, #the plane will have at minimum 3 vertices, as that is the geometric limit for plane definition
+            context.scene.frankfork_plane_obj.data.vertices[1].co,
+            context.scene.frankfork_plane_obj.data.vertices[2].co
+            ])
+        p0, p1, p2 = points
+        x0, y0, z0 = p0
+        x1, y1, z1 = p1
+        x2, y2, z2 = p2
+
+        print(points)
+
+        u = [x1-x0, y1-y0, z1-z0] #first vector
+        v = [x2-x0, y2-y0, z2-z0] #sec vector
+
+        plane_normal_vec = np.cross(u, v)
+
+        print(plane_normal_vec)
+
+        #get first point from marker
+        context.scene.frame_set(context.scene.keyframe_condyle_angle_start)
+        condyle_pos1 = np.array(marker_obj.location)
+
+        #get second point from marker
+        context.scene.frame_set(context.scene.keyframe_condyle_angle_end)
+        condyle_pos2 = np.array(marker_obj.location)
+        print(condyle_pos1, condyle_pos2)
+        condyle_vector = condyle_pos2 - condyle_pos1
+        print(condyle_vector)
+        # Note: returns angle in radians
+        def theta(v, w): return np.arccos(v.dot(w)/(np.linalg.norm(v)*np.linalg.norm(w)))
+        context.scene.condylar_angle = 90 - np.degrees(theta(plane_normal_vec, condyle_vector))
+        print(context.scene.condylar_angle)
+        
+        return {"FINISHED"}
 
 class ODC_Facebow_Preferences(bpy.types.AddonPreferences):
     # this must match the add-on name, use '__package__'
@@ -950,6 +994,15 @@ class ODC_Facebow_Panel(bpy.types.Panel, ImportHelper):
             row = layout.row()
             row.operator("facebow.segment_actionpath")
 
+        row = layout.row()
+        row.label(text="Estimate Condylar Angle:")
+        row = layout.row()
+        row.prop(context.scene, "keyframe_condyle_angle_start")
+        row.prop(context.scene, "keyframe_condyle_angle_end")
+        row = layout.row()
+        row.operator("facebow.calc_condyle_angle")
+        row.label(text=str(round(context.scene.condylar_angle, 1))+" deg.")
+
 
 
 class ModalTimerOperator(bpy.types.Operator):
@@ -1040,6 +1093,10 @@ def register():
     bpy.types.Scene.keyframe_segment_end = bpy.props.IntProperty(name="", description="", default=250)
     bpy.types.Scene.keyframe_segment_name = bpy.props.StringProperty(name = "Segment Name: ", description = "", default = "")
 
+    bpy.types.Scene.keyframe_condyle_angle_start = bpy.props.IntProperty(name="Start", description="", default=0)
+    bpy.types.Scene.keyframe_condyle_angle_end = bpy.props.IntProperty(name="End", description="", default=0)
+    bpy.types.Scene.condylar_angle = bpy.props.FloatProperty(name="Condylar Angle", description="", default=0)
+
     bpy.types.Scene.FRAME_WIDTH = bpy.props.IntProperty(name="Width (px):", description="", default=1920)
     bpy.types.Scene.FRAME_HEIGHT = bpy.props.IntProperty(name="Height (px):", description="", default=1080)
     bpy.types.Scene.VIDEO_FPS = bpy.props.IntProperty(name="Frames/s (FPS):", description="", default=120)
@@ -1075,6 +1132,7 @@ def register():
     bpy.utils.register_class(smooth_keyframes)
     bpy.utils.register_class(show_keyframe_path)
     bpy.utils.register_class(segment_keyframes)
+    bpy.utils.register_class(calc_cond_angle)
 
     bpy.utils.register_class(ModalTimerOperator)
 
@@ -1147,6 +1205,10 @@ def unregister():
     del bpy.types.Scene.keyframe_segment_end
     del bpy.types.Scene.keyframe_segment_name
 
+    del bpy.types.Scene.keyframe_condyle_angle_start
+    del bpy.types.Scene.keyframe_condyle_angle_end
+    del bpy.types.Scene.condylar_angle
+
     del bpy.types.Scene.FRAME_WIDTH
     del bpy.types.Scene.FRAME_HEIGHT
     del bpy.types.Scene.VIDEO_FPS
@@ -1180,6 +1242,7 @@ def unregister():
     bpy.utils.unregister_class(smooth_keyframes)
     bpy.utils.unregister_class(show_keyframe_path)
     bpy.utils.unregister_class(segment_keyframes)
+    bpy.utils.unregister_class(calc_cond_angle)
 
     bpy.utils.unregister_class(ModalTimerOperator)
 

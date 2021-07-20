@@ -35,3 +35,16 @@ C:\Program Files\Blender Foundation\Blender 2.83\2.83\python\bin>
 make sure to have at least 1-2mm of white space around markers
 when calibrating, take pictures of the calibration board NOT with the camera but with the picture snapshot of the cam link feed
 the calibration board is rotated around a center axis with images capturing the different angles, camera is static
+
+'''
+NOTES:
+Calibrate on floor at fixed focal length (auto focus, then set lens to manual. macro lenses have no zoom).
+Take from many angles as possible, even if board is partially visible or up close
+POOR LIGHTING AND BLURRINESS can lead to failure to properly calibrate
+when recording/tracking patient movements, don't let the marker be normal to camera view... openCV has difficulty w/ estimating position along z-axis (the axis facing the camera) causing jitter. tilt patient head slightly at an angle so marker is facing directly the camera
+
+https://docs.opencv.org/master/d5/dae/tutorial_aruco_detection.html
+https://docs.opencv.org/3.4/db/da9/tutorial_aruco_board_detection.html
+https://www.programmersought.com/article/3045939358/
+
+'''
