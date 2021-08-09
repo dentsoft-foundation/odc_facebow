@@ -31,7 +31,7 @@ except ModuleNotFoundError as e:
     except ModuleNotFoundError as e: print("Failed to pip install dependencies!")
 
 class aruco_tracker():
-    def __init__(self, context, data_source=cv2.CAP_DSHOW, debug=False, process_in_main=False):
+    def __init__(self, context, data_source=0, debug=False, process_in_main=False):
         if context.scene.legacy_file is False:
             if process_in_main is False:
                 self.processor_thread = threading.Thread(target=self.stream_processor, args=(context, data_source, debug))
@@ -83,8 +83,10 @@ class aruco_tracker():
         # create an identitiy matrix
         mat_sca = Matrix.Scale(0.001, 4)
         print(tvec)
-        
-        mat_trans = Matrix.Translation((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0]))) #structure on single markers -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))) #structure when doing POSE [[-0.20874319], [-0.13054966], [ 0.98599982]] - >((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])))
+        if context.scene.stereo_vision == True:
+            mat_trans = Matrix.Translation((float(tvec[0]), float(tvec[1]), float(tvec[2])))
+        else:
+            mat_trans = Matrix.Translation((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0]))) #structure on single markers -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))) #structure when doing POSE [[-0.20874319], [-0.13054966], [ 0.98599982]] - >((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])))
         # https://devtalk.blender.org/t/understanding-matrix-operations-in-blender/10148
         mat_rot_x = Matrix.Rotation(r_euler[0], 4, 'X')
         mat_rot_y = Matrix.Rotation(r_euler[1], 4, 'Y')
@@ -175,6 +177,113 @@ class aruco_tracker():
 
         # Create vectors we'll be using for rotations and translations for postures
         rvecs, tvecs = None, None
+
+        #https://github.com/niconielsen32/ComputerVision/blob/master/StereoVisionDepthEstimation/stereoVision.py
+        if data_source == "stereo_vision":
+            CHARUCO_BOARD = aruco.CharucoBoard_create(
+                squaresX=context.scene.cal_board_X_num,
+                squaresY=context.scene.cal_board_Y_num,
+                squareLength=context.scene.cal_board_squareLength,
+                markerLength=context.scene.cal_board_markerLength,
+                dictionary=context.scene.aruco_dict)
+            print(context.scene.cal_board_X_num)
+            (retStereo, L_intrinsics, L_distortion, R_intrinsics, R_distortion, R, T, essentialMatrix, fundamentalMatrix) = context.scene.calibration_data
+
+            codec = 0x47504A4D # MJPG
+            cap_right = cv2.VideoCapture(0)
+            cap_right.set(cv2.CAP_PROP_FOURCC, codec)
+            cap_left =  cv2.VideoCapture(1)
+            cap_left.set(cv2.CAP_PROP_FOURCC, codec)
+            current_frame = 0
+            while(cap_right.isOpened() and cap_left.isOpened()):
+                succes_right, frame_right = cap_right.read()
+                frame_right = cv2.cvtColor(frame_right,cv2.COLOR_BGR2GRAY)
+                succes_left, frame_left = cap_left.read()
+                frame_left = cv2.cvtColor(frame_left,cv2.COLOR_BGR2GRAY)
+                current_frame += 1
+                #frame_right, frame_left = undistortRectify(frame_right, frame_left)
+
+                cornersR, idsR, rejected_img_pointsR = aruco.detectMarkers(frame_right, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
+                cv2.aruco.drawDetectedMarkers(frame_right,cornersR,idsR)
+                cornersR2 = None
+                if np.all(idsR is not None):
+                    for i in range(0, len(idsR)):
+                        R_rvec, R_tvec, R_markerPoints = aruco.estimatePoseSingleMarkers(cornersR[i], context.scene.cal_board_markerLength, context.scene.cameraMatrix, context.scene.distCoeffs) 
+                        (R_rvec - R_tvec).any()  # get rid of that nasty numpy value array error
+                        aruco.drawAxis(frame_right, context.scene.cameraMatrix, context.scene.distCoeffs, R_rvec, R_tvec, 0.05)  # Draw Axis
+                    #convert charuco corners to chessboard corners
+                    retR, cornersR2, corner_ids_R = cv2.aruco.interpolateCornersCharuco(cornersR, idsR, frame_right, CHARUCO_BOARD)
+                    #cv2.aruco.drawDetectedMarkers(frame_right,cornersR2,corner_ids_R)
+                    #print(cornersR2)
+
+                cornersL, idsL, rejected_img_pointsL = aruco.detectMarkers(frame_left, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
+                cv2.aruco.drawDetectedMarkers(frame_left,cornersL,idsL)
+                cornersL2 = None
+                if np.all(idsL is not None):
+                    for i in range(0, len(idsL)):
+                        L_rvec, L_tvec, L_markerPoints = aruco.estimatePoseSingleMarkers(cornersL[i], context.scene.cal_board_markerLength, context.scene.cameraMatrix, context.scene.distCoeffs) 
+                        (L_rvec - L_tvec).any()  # get rid of that nasty numpy value array error
+                        aruco.drawAxis(frame_left, context.scene.cameraMatrix, context.scene.distCoeffs, L_rvec, L_tvec, 0.05)  # Draw Axis
+                    #convert charuco corners to chessboard corners
+                    retL, cornersL2, corner_ids_L = cv2.aruco.interpolateCornersCharuco(cornersL, idsL, frame_left, CHARUCO_BOARD)
+                    #cv2.aruco.drawDetectedMarkers(frame_left,cornersL2,corner_ids_L)
+                    #print(cornersL2)
+                if np.all(idsL is not None) and np.all(cornersR2 is not None) and np.all(idsR is not None) and np.all(cornersL2 is not None):
+                    try:
+                        cornersR = np.array(cornersR2).astype(np.float32)
+                        cornersL = np.array(cornersL2).astype(np.float32)
+                        mtx1 = np.array(L_intrinsics)
+                        mtx2 = np.array(R_intrinsics)
+                        #print(mtx1, mtx2)
+                        dist1 = L_distortion
+                        dist2 = R_distortion
+                        projMat1 = mtx1 @ cv2.hconcat([np.eye(3), np.zeros((3,1))]) # Cam1 is the origin
+                        projMat2 = mtx2 @ cv2.hconcat([R, T]) # R, T from stereoCalibrate
+                        #= cv2.stereoRectify(cameraMatrix1, distCoeffs1, cameraMatrix2, distCoeffs2, imageSize, R, T)
+                        # points1 is a (N, 1, 2) float32 from cornerSubPix
+                        points1u = cv2.undistortPoints(cornersR, mtx1, dist1, None, mtx1)
+                        points2u = cv2.undistortPoints(cornersL, mtx2, dist2, None, mtx2)
+
+                        points4d = cv2.triangulatePoints(projMat1, projMat2, points1u, points2u)
+                        points3d = (points4d[:3, :]/points4d[3, :]).T
+                        print(points3d)
+                        self.queue.put([1, points3d[1], R_rvec, current_frame])
+                    except: pass
+                '''
+                stereo_ids = [] #this ensures that a marker is detected by both cameras
+                for id in idsR: #this is not elegant... what is idsR is a shorter list than idsL
+                    for l_id in idsL:
+                        if id[0] = l_id[0]:
+                            stereo_ids.append(id)
+
+                for i in range(0,len(stereo_ids)):
+                    rvec, tvec, markerPoints = aruco.estimatePoseSingleMarkers(corners[i], context.scene.cal_board_markerLength, context.scene.cameraMatrix, context.scene.distCoeffs) 
+                    (rvec - tvec).any()  # get rid of that nasty numpy value array error
+
+                
+                
+                    cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
+                    aruco.drawAxis(imgGrey, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.05)  # Draw Axis
+
+
+                    if context.scene.legacy_file is False: self.queue.put([ids[i][0], tvec, rvec, current_frame])
+                '''
+
+                if debug == True:
+                    cv2.namedWindow("source_0", cv2.WINDOW_NORMAL)
+                    cv2.namedWindow("source_1", cv2.WINDOW_NORMAL)
+                    #cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
+
+                    cv2.imshow("source_0", frame_right)
+                    cv2.imshow("source_1", frame_left)
+
+                    #cv2.imshow("PyrDown", imgPyrDown)
+                    if cv2.waitKey(1) & 0xFF ==ord('q'):
+                        cv2.destroyAllWindows()
+                    
+
+            return
+
         if source == 'video':
             cap = cv2.VideoCapture(data_source)
             #cam = cv2.VideoCapture("1.mp4")
@@ -485,7 +594,7 @@ class calibrate(bpy.types.Operator, ImportHelper):
             print(filepath)
 
         images = glob.glob(self.directory+'*.jpg')
-
+        calib_img_size = None
         # Loop through images glob'ed
         for iname in images:
             # Open the image
@@ -530,20 +639,15 @@ class calibrate(bpy.types.Operator, ImportHelper):
                 # Reproportion the image, maxing width or height at 1000
                 proportion = max(img.shape) / 1000.0
                 img = cv2.resize(img, (int(img.shape[1]/proportion), int(img.shape[0]/proportion)))
+                calib_img_size = img.shape
                 # Pause to display each image, waiting for key press
-                cv2.imshow('Charuco board', img)
-                cv2.waitKey(0)
+                #cv2.imshow('Charuco board', img)
+                #cv2.waitKey(0)
             else:
                 print("Not able to detect a charuco board in image: {}".format(iname))
 
         # Destroy any open CV windows
-        cv2.destroyAllWindows()
-
-        # Make sure at least one image was found
-        if len(images) < 1:
-            # Calibration failed because there were no images, warn the user
-            print("Calibration was unsuccessful. No images of charucoboards were found. Add images of charucoboards and use or alter the naming conventions used in this file.")
-
+        #cv2.destroyAllWindows()
         # Make sure we were able to calibrate on at least one charucoboard by checking
         # if we ever determined the image size
         if not image_size:
@@ -569,9 +673,130 @@ class calibrate(bpy.types.Operator, ImportHelper):
         f = open(self.directory+'calibration.pckl', 'wb')
         pickle.dump((bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, rvecs, tvecs), f)
         f.close()
-            
-        # Print to console our success
         print('Calibration successful. Calibration file used: {}'.format(self.directory+'calibration.pckl'))
+
+        if context.scene.stereo_vision == True:
+            print("started stereo calibration")
+            #lets first convert corner IDs to object points per https://stackoverflow.com/questions/64612924/opencv-stereocalibration-of-two-cameras-using-charuco
+            # https://stackoverflow.com/questions/67281275/opencv-stereocalibration-with-charuco-board-provides-wrong-values
+
+            # https://stackoverflow.com/questions/67281275/opencv-stereocalibration-with-charuco-board-provides-wrong-values
+
+            ###################
+            '''This code is for performing the stereo calibration if 
+            the intrinsic parameters and the necessary images are available.'''
+            ###################
+            # Create ChArUco
+            aruco_dict = context.scene.aruco_dict
+            board = CHARUCO_BOARD
+            arucoParams = cv2.aruco.DetectorParameters_create()
+
+            counter_L, corners_list_L, id_list_L = [], [], []
+            counter_R, corners_list_R, id_list_R = [], [], []
+
+            # load the intrinsic parameters obtained from Int_Calibration.py
+            mtxR, distR, rvecsR, tvecsR = bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, rvecs, tvecs
+            mtxL, distL, rvecsL, tvecsL = bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, rvecs, tvecs
+
+            # Arrays to store object points and image points from all the images.
+            objpoints = []  # 3d point in real world space
+            imgpointsL = []  # 2d points in left image plane
+            imgpointsR = []  # 2d points in right image plane
+
+            # Get images for left and right directory
+            images_l = images #glob.glob('data1/*.jpg')
+            images_r = images #glob.glob('data2/*.jpg')
+
+            # Images should be perfect pairs. Otherwise all the calibration will be false
+            images_l.sort()
+            images_r.sort()
+
+            # Pairs should be same size. Otherwise we have sync problem.
+            if len(images_l) != len(images_r):
+                print("Numbers of left and right images are not equal. They should be pairs.")
+                print("Left images count: ", len(images_l))
+                print("Right images count: ", len(images_r))
+                sys.exit(-1)
+
+            # Pair the images for single loop handling
+            pair_images = zip(images_l, images_r)
+
+            for images_l, images_r in pair_images:
+                # Left Image Points
+                img_l = cv2.imread(images_l)
+                grayL = cv2.cvtColor(img_l, cv2.COLOR_BGR2GRAY)
+                corners_L, ids_L, rejected_L = cv2.aruco.detectMarkers(grayL, aruco_dict, parameters=arucoParams)
+                resp_L, charuco_corners_L, charucos_ids_L = cv2.aruco.interpolateCornersCharuco(corners_L, ids_L, grayL, board)
+
+                # Right Image Points
+                img_r = cv2.imread(images_r)
+                grayR = cv2.cvtColor(img_r, cv2.COLOR_BGR2GRAY)
+                corners_R, ids_R, rejected_R = cv2.aruco.detectMarkers(grayR, aruco_dict, parameters=arucoParams)
+                resp_R, charuco_corners_R, charucos_ids_R = cv2.aruco.interpolateCornersCharuco(corners_R, ids_R, grayR, board)
+
+
+                objpoints_L, imgpoints_L = cv2.aruco.getBoardObjectAndImagePoints(board, charuco_corners_L, charucos_ids_L)
+                objpoints_R, imgpoints_R = cv2.aruco.getBoardObjectAndImagePoints(board, charuco_corners_R, charucos_ids_R)
+
+                if resp_L == resp_R and (resp_L and resp_R) > 1:
+                    corners_list_L.append(charuco_corners_L)
+                    corners_list_R.append(charuco_corners_R)
+
+                    id_list_L.append(charucos_ids_L)
+                    id_list_R.append(charucos_ids_R)
+
+                    objpoints.append(objpoints_L)
+                    imgpointsR.append(imgpoints_R)
+                    imgpointsL.append(imgpoints_L)
+                    # Draw and display the corners
+                    '''
+                    cv2.aruco.drawDetectedCornersCharuco(img_l, charuco_corners_L, charucos_ids_L, (255,0,0))
+                    cv2.aruco.drawDetectedCornersCharuco(img_r, charuco_corners_R, charucos_ids_R, (255,0,0))
+
+                    cv2.imshow('imgL', img_l)
+                    cv2.imshow('imgR', img_r)
+                    cv2.moveWindow("imgR", 800, 0)
+                    cv2.waitKey(200)
+                    '''
+                else:
+                    print("Chessboard couldn't detected. Image pair: ", images_l, " and ", images_r)
+                    continue
+
+            cv2.destroyAllWindows()
+
+            ret, M1, d1, M2, d2, R, T, E, F = cv2.stereoCalibrate(objpoints, imgpointsL, imgpointsR, mtxL, distL, mtxR, distR, image_size)
+            print(ret, M1, d1, M2, d2, R, T, E, F)
+            # corresponds to retStereo, L_intrinsics, L_distortion, R_intrinsics, R_distortion, R, T, essentialMatrix, fundamentalMatrix
+
+
+            """
+            obj_points, img_points = cv2.aruco.getBoardObjectAndImagePoints(CHARUCO_BOARD, corners_all, charuco_ids)
+            '''
+            calib_img_size = (calib_img_size[1], calib_img_size[0])
+            newCameraMatrixL, roi_L = cv2.getOptimalNewCameraMatrix(bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, calib_img_size, 1, calib_img_size)
+            newCameraMatrixR, roi_R = cv2.getOptimalNewCameraMatrix(bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, calib_img_size, 1, calib_img_size)
+            '''
+            # This step is performed to transformation between the two cameras and calculate Essential and Fundamenatl matrix
+            # here we use corners_all on Left and Rigth camera since they are exactly the same and have same configuration, so calibration is the same for both; same for distortion coefficient
+            retStereo, L_intrinsics, L_distortion, R_intrinsics, R_distortion, R, T, essentialMatrix, fundamentalMatrix = cv2.stereoCalibrate(obj_points, img_points, img_points, bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, image_size)
+            '''
+            #print(newCameraMatrixL)
+            #print(newCameraMatrixR)
+
+            ########## Stereo Rectification #################################################
+
+            rectifyScale= 1
+            rectL, rectR, projMatrixL, projMatrixR, Q, roi_L, roi_R= cv2.stereoRectify(newCameraMatrixL, distL, newCameraMatrixR, distR, grayL.shape[::-1], rot, trans, rectifyScale,(0,0))
+
+            stereoMapL = cv2.initUndistortRectifyMap(newCameraMatrixL, distL, rectL, projMatrixL, grayL.shape[::-1], cv2.CV_16SC2)
+            stereoMapR = cv2.initUndistortRectifyMap(newCameraMatrixR, distR, rectR, projMatrixR, grayR.shape[::-1], cv2.CV_16SC2)
+            '''
+            """
+            f = open(self.directory+'stereo_calibration.pckl', 'wb')
+            pickle.dump((ret, M1, d1, M2, d2, R, T, E, F), f) # (x,y)
+            f.close()
+            # Print to console our success
+            print('Stereo calibration successful. Calibration file used: {}'.format(self.directory+'stereo_calibration.pckl'))
         return {'FINISHED'}
 
 class load_config(bpy.types.Operator, ImportHelper):
@@ -594,6 +819,16 @@ class load_config(bpy.types.Operator, ImportHelper):
             (bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, _, _) = calibration_data
         except: print("Not a python pickled file.")
         infile.close()
+
+        if context.scene.stereo_vision == True:
+            directory, filename = os.path.split(self.filepath)
+            infile = open(directory+"\\stereo_"+filename,'rb')
+            try: 
+                bpy.types.Scene.calibration_data = pickle.load(infile)
+                print(calibration_data)
+                #(retStereo, L_intrinsics, L_distortion, R_intrinsics, R_distortion, R, T, essentialMatrix, fundamentalMatrix) = calibration_data
+            except: print("Not a python pickled file.")
+
 
         return {'FINISHED'}
 
@@ -658,6 +893,9 @@ class capture_input_data(bpy.types.Operator):
         if context.scene.legacy_file is False:
             if context.scene.live_cam == True:
                 bpy.types.Scene.tracker_instance = aruco_tracker(context, debug=context.scene.debug_cv)
+                bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
+            elif context.scene.stereo_vision is True:
+                bpy.types.Scene.tracker_instance = aruco_tracker(context, "stereo_vision", context.scene.debug_cv)
                 bpy.ops.wm.modal_timer_operator("INVOKE_DEFAULT")
             else:
                 bpy.types.Scene.tracker_instance = aruco_tracker(context, context.scene.pt_record, context.scene.debug_cv)
@@ -1067,10 +1305,12 @@ def register():
     bpy.types.Scene.cameraMatrix = None
     bpy.types.Scene.distCoeffs = None
     bpy.types.Scene.tracker_instance = None
-    bpy.types.Scene.use_pose_board = bpy.props.BoolProperty(name="Use Pose Board", description="Use a group of markers to estimate position. Use of multiple markers increases accuracy.", default=True) #true during research
+    bpy.types.Scene.use_pose_board = bpy.props.BoolProperty(name="Use Pose Board", description="Use a group of markers to estimate position. Use of multiple markers increases accuracy.", default=False) #true during research
 
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
+    bpy.types.Scene.stereo_vision = True
+    bpy.types.Scene.calibration_data = None
 
     bpy.types.Scene.frankfort_plane_enable = bpy.props.BoolProperty(name="", description="Enable the Frankfort Plane tracking.", default=False)
     bpy.types.Scene.frankfort_plane_points_post_L = bpy.props.PointerProperty(name = "", type=bpy.types.Object) #bpy.props.StringProperty(name = "", description = "The 3 markers defining the Frankfort plane. Format ex.: 2,3,1", default = "")
@@ -1183,6 +1423,9 @@ def unregister():
 
     del bpy.types.Scene.live_cam
     del bpy.types.Scene.pt_record
+    del bpy.types.Scene.stereo_vision
+    del bpy.types.Scene.calibration_data
+
 
     del bpy.types.Scene.frankfort_plane_enable
     del bpy.types.Scene.frankfort_plane_points_post_L
