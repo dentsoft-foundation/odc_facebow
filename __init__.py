@@ -8,6 +8,8 @@ import math
 import bpy, bmesh
 from bpy_extras.io_utils import ImportHelper
 
+from . import leapuvc
+
 import pip
 
 import time
@@ -25,6 +27,7 @@ try:
 except ModuleNotFoundError as e:
     print("OpenCV not present, attempting install via pip.")
     pymod_install('opencv-contrib-python')
+    pymod_install('scipy')
     try:
         import cv2
         from cv2 import aruco
@@ -86,7 +89,11 @@ class aruco_tracker():
         if context.scene.stereo_vision == True:
             mat_trans = Matrix.Translation((float(tvec[0]), float(tvec[1]), float(tvec[2])))
         else:
-            mat_trans = Matrix.Translation((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0]))) #structure on single markers -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))) #structure when doing POSE [[-0.20874319], [-0.13054966], [ 0.98599982]] - >((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])))
+            if context.scene.use_pose_board is True:
+                mat_trans = Matrix.Translation((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])))
+            else:
+                mat_trans = Matrix.Translation((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+            #structure on single markers -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))) #structure when doing POSE [[-0.20874319], [-0.13054966], [ 0.98599982]] - >((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])))
         # https://devtalk.blender.org/t/understanding-matrix-operations-in-blender/10148
         mat_rot_x = Matrix.Rotation(r_euler[0], 4, 'X')
         mat_rot_y = Matrix.Rotation(r_euler[1], 4, 'Y')
@@ -119,14 +126,22 @@ class aruco_tracker():
         bm = bmesh.new()
         bm.from_mesh(obj.data)
         #print(tvec, type(tvec))
-        if type(tvec) is not type(Vector()): bm.verts.new((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0]))) #single marker -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+        if type(tvec) is not type(Vector()):
+            if context.scene.use_pose_board is True:
+                bm.verts.new((float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0]))) #single marker -> ((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
+            else:
+                bm.verts.new((float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2])))
         else: bm.verts.new(tvec)
         bm.verts.ensure_lookup_table()
         if len(bm.verts) > 1: bm.edges.new((bm.verts[-2], bm.verts[-1]))
         bm.to_mesh(obj.data)
         bm.free()
 
-        if type(tvec) is not type(Vector()): keyframe_tracking.location = (float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])) #single marker -> (float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))
+        if type(tvec) is not type(Vector()):
+            if context.scene.use_pose_board is True:
+                keyframe_tracking.location = (float(tvec[0][0]), float(tvec[1][0]), float(tvec[2][0])) #single marker -> (float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))
+            else:
+                keyframe_tracking.location = (float(tvec[0][0][0]), float(tvec[0][0][1]), float(tvec[0][0][2]))
         else: keyframe_tracking.location = tvec
         
         dg = context.evaluated_depsgraph_get()
@@ -192,7 +207,7 @@ class aruco_tracker():
             codec = 0x47504A4D # MJPG
             cap_right = cv2.VideoCapture(0)
             cap_right.set(cv2.CAP_PROP_FOURCC, codec)
-            cap_left =  cv2.VideoCapture(1)
+            cap_left =  cv2.VideoCapture(2)
             cap_left.set(cv2.CAP_PROP_FOURCC, codec)
             current_frame = 0
             while(cap_right.isOpened() and cap_left.isOpened()):
@@ -320,7 +335,7 @@ class aruco_tracker():
         if context.scene.legacy_file is True:
             f = open(os.path.join(context.scene.legacy_dir, 'data_stream.txt'), "w")
 
-        if  context.scene.use_pose_board is True:
+        if context.scene.use_pose_board is True:
             # create the opencv pose board object by indicating which IDs are grouped together
             anterior_ids = np.array([[0], [1], [2]], dtype=np.int32)
             anterior_board = aruco.Board_create(context.scene.pose_board_local_co, ARUCO_DICT, anterior_ids)
@@ -329,32 +344,94 @@ class aruco_tracker():
             right_ids = np.array([[6], [7], [8]], dtype=np.int32)
             right_board = aruco.Board_create(context.scene.pose_board_local_co, ARUCO_DICT, right_ids)
             MarkersIdCornersDict = dict()
+            print("using pose board!")
 
+        if context.scene.leap_controller is True:
+            '''
+            Leap Motion controller has a pair of global shutter
+            Aptina MT9V024 sensors. The native resolution is 752x480, although our typical
+            resolution is cropped to 640x480 (VGA) and then further downsampled vertically
+            to 640x240 via hardware binning.
+            '''
+            capResolution = (640, 480)
+            cam = cv2.VideoCapture(0 + cv2.CAP_DSHOW)
+            cam.set(cv2.CAP_PROP_FRAME_WIDTH, capResolution[0])
+            cam.set(cv2.CAP_PROP_FRAME_HEIGHT, capResolution[1])
+            calibration = leapuvc.retrieveLeapCalibration(cam, capResolution)
+            cam.release()
+
+            bpy.types.Scene.cameraMatrix = calibration['left']["extrinsics"]["cameraMatrix"]
+            bpy.types.Scene.distCoeffs = calibration['left']["intrinsics"]["distCoeffs"]
+            print(bpy.types.Scene.cameraMatrix)
+            print(bpy.types.Scene.distCoeffs)
+
+            
+            # Start the Leap Capture Thread
+            leap = leapuvc.leapImageThread(resolution=(640, 480))
+            leap.start()
+            #leap.setExposure(100)
+            leap.setLeftLED(1)
+            leap.setCenterLED(1)
+            leap.setRightLED(1)
+            # Define Various Camera Control Settings
+            cv2.namedWindow   ('Settings')
+            cv2.createTrackbar('Rectify',   'Settings', 0, 1,  lambda a:0)                # Applies image rectification
+            cv2.createTrackbar('Exposure',  'Settings', 100,  32222, leap.setExposure)   # Sets the exposure time in microseconds
+            #cv2.createTrackbar('LEDs',      'Settings', 1, 1,  lambda a: (leap.setLeftLED(a), leap.setCenterLED(a), leap.setRightLED(a))) # Turns on the IR LEDs
+            cv2.createTrackbar('Gamma',     'Settings', 0, 1,  leap.setGammaEnabled)      # Applies a sqrt(x) contrast-reducing curve in 10-bit space
+            cv2.createTrackbar('Anlg Gain', 'Settings', 0, 63, leap.setGain)              # Amplifies the signal in analog space, 16-63
+            cv2.createTrackbar('Dgtl Gain', 'Settings', 0, 16, leap.setDigitalGain)       # Digitally amplifies the signal in 10-bit space
+            cv2.createTrackbar('HDR',       'Settings', 0, 1,  leap.setHDR)               # Selectively reduces the exposure of bright areas at the cost of fixed-pattern noise
+            #cv2.createTrackbar('Rotate',    'Settings', 0, 1,  leap.set180Rotation)       # Rotates each camera image in-place 180 degrees (need to unflip when using calibrations!)
+            #cv2.createTrackbar('V Offset',  'Settings', 0, 240, leap.setVerticalCenter)   # Control the Vertical Offset of the camera Image (need to offset when using calibrations!)
+            #bpy.types.Scene.cameraMatrix = leap.calibration['left']["extrinsics"]["cameraMatrix"]
+            
+            #print(leap.calibration['left']["extrinsics"]["cameraMatrix"])
+            #print(leap.calibration['left']["intrinsics"]["distCoeffs"])
+
+        ids = None
+        current_frame = 0
         while True:
-            current_frame = None
-            if source == 'video':
-                success, img = cap.read()
-                current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
-                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-            if source == 'img':
-                current_frame = 0
-                total_frames = 0
-                img = cv2.imread(data_source)
-            imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
-            #imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
-            #imgPyrDown = cv2.pyrDown(imgGrey)
+            current_frame += 1
+            total_frames = None
+            if context.scene.leap_controller is True:
+                newFrame, imgGrey = leap.read()
+                if imgGrey is not None: imgGrey = imgGrey[0] #0 is left camera, 1 is right camera
+                if(newFrame):
+                    corners, ids, rejectedImgPoints = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS)
+                    #cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
+            else:
+                if source == 'video':
+                    success, img = cap.read()
+                    current_frame = int(cap.get(cv2.CAP_PROP_POS_FRAMES))
+                    total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                if source == 'img':
+                    current_frame = 0
+                    total_frames = 0
+                    img = cv2.imread(data_source)
+                imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
+                #imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
+                #imgPyrDown = cv2.pyrDown(imgGrey)
 
-            # lists of ids and the corners beloning to each id
-            corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=context.scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
-            cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
-            #for one in rejected_img_points:
-            #    more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
+                #undistor frame image
+                h, w = imgGrey.shape[:2]
+                newcameramtx, roi = cv2.getOptimalNewCameraMatrix(bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, (w,h), 1, (w,h))
+                imgGrey = cv2.undistort(imgGrey, bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, None, newcameramtx)
+                # crop the image
+                x, y, w, h = roi
+                imgGrey = imgGrey[y:y+h, x:x+w]
+
+                # lists of ids and the corners beloning to each id
+                corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=newcameramtx, distCoeff=context.scene.distCoeffs)
+                cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
+                #for one in rejected_img_points:
+                #    more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
             
             # Outline all of the markers detected in our image
             
             if np.all(ids is not None):  # If there are markers found by detector
                 if  context.scene.use_pose_board is True:
-                    if ids is not None and len(ids) >= 9:
+                    if ids is not None and len(ids) >= 2:
                         for i in range(0, len(ids)):  # Iterate in markers
                             MarkersIdCornersDict[ids[i][0]] = (list(corners))[i]
 
@@ -425,12 +502,14 @@ class aruco_tracker():
                         #print(ids)
                         
                         cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
-                        aruco.drawAxis(imgGrey, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.05)  # Draw Axis
+                        aruco.drawAxis(imgGrey, context.scene.cameraMatrix, context.scene.distCoeffs, rvec, tvec, 0.01)
+                        #print(rvec, tvec)
                         if context.scene.legacy_file is False: self.queue.put([ids[i][0], tvec, rvec, current_frame])
                         elif context.scene.legacy_file is True:
                             f.write(str([ids[i][0], tvec.tolist(), rvec.tolist(), current_frame])+"\n")
                 
-            if debug == True:
+
+            if debug == True and imgGrey is not None:
                 cv2.namedWindow("img", cv2.WINDOW_NORMAL)
                 #cv2.namedWindow("PyrDown", cv2.WINDOW_NORMAL)
 
@@ -595,6 +674,7 @@ class calibrate(bpy.types.Operator, ImportHelper):
 
         images = glob.glob(self.directory+'*.jpg')
         calib_img_size = None
+        i=0
         # Loop through images glob'ed
         for iname in images:
             # Open the image
@@ -613,11 +693,13 @@ class calibrate(bpy.types.Operator, ImportHelper):
                     corners=corners)
 
             # Get charuco corners and ids from detected aruco markers
-            response, charuco_corners, charuco_ids = aruco.interpolateCornersCharuco(
-                    markerCorners=corners,
-                    markerIds=ids,
-                    image=gray,
-                    board=CHARUCO_BOARD)
+            try:
+                response, charuco_corners, charuco_ids = aruco.interpolateCornersCharuco(
+                        markerCorners=corners,
+                        markerIds=ids,
+                        image=gray,
+                        board=CHARUCO_BOARD)
+            except: continue
 
             # If a Charuco board was found, let's collect image/corner points
             # Requiring at least 20 squares
@@ -643,6 +725,8 @@ class calibrate(bpy.types.Operator, ImportHelper):
                 # Pause to display each image, waiting for key press
                 #cv2.imshow('Charuco board', img)
                 #cv2.waitKey(0)
+                i+=1
+                print("image: "+str(i)+" of "+str(len(images))+ " successful")
             else:
                 print("Not able to detect a charuco board in image: {}".format(iname))
 
@@ -1062,6 +1146,8 @@ class calc_cond_angle(bpy.types.Operator):
         v = [x2-x0, y2-y0, z2-z0] #sec vector
 
         plane_normal_vec = np.cross(u, v)
+        norm = np.linalg.norm(plane_normal_vec)
+        plane_normal_vec = plane_normal_vec/norm
 
         print(plane_normal_vec)
 
@@ -1309,7 +1395,8 @@ def register():
 
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
-    bpy.types.Scene.stereo_vision = True
+    bpy.types.Scene.stereo_vision = False
+    bpy.types.Scene.leap_controller = True
     bpy.types.Scene.calibration_data = None
 
     bpy.types.Scene.frankfort_plane_enable = bpy.props.BoolProperty(name="", description="Enable the Frankfort Plane tracking.", default=False)
@@ -1380,6 +1467,8 @@ def register():
     bpy.types.Scene.marker_obj_list = bpy.props.CollectionProperty(type=def_marker_obj_list)
 
     ##############################################################################################
+    #straight board
+    '''
     bpy.types.Scene.pose_board_local_co = [
         np.array(
             [
@@ -1405,6 +1494,37 @@ def register():
                 [0, -0.04125, 0.014583],
                 [0, -0.04125, -0.014583],
                 [0, 0.04125, -0.014583]
+            ],
+            dtype=np.float32,
+        ),
+    ]
+    '''
+    #30 degree board
+    bpy.types.Scene.pose_board_local_co = [
+        np.array(
+            [
+                [-0.15513, 0.04125, 0.047544],
+                [-0.15513, -0.04125, 0.047544],
+                [-0.15513, -0.04125, 0.018377],
+                [-0.15513, 0.04125, 0.018377]
+            ],
+            dtype=np.float32,
+        ),
+        np.array(
+            [
+                [-0.133976, 0.04125, 0.013712],
+                [-0.133976, -0.04125, 0.013712],
+                [0.133976, -0.04125, -0.013712],
+                [0.133976, 0.04125, -0.013712]
+            ],
+            dtype=np.float32,
+        ),
+        np.array(
+            [
+                [0.191769, 0.04125, -0.017127],
+                [0.191769, -0.04125, -0.017127],
+                [0.61922, -0.04125, -0.03171],
+                [0.61922, 0.04125, -0.03171]
             ],
             dtype=np.float32,
         ),

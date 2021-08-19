@@ -48,3 +48,14 @@ https://docs.opencv.org/3.4/db/da9/tutorial_aruco_board_detection.html
 https://www.programmersought.com/article/3045939358/
 
 '''
+
+
+RUN BLENDER AS ADMIN 
+>>> from pip._internal import main
+>>> main(['install', 'scipy'])
+Collecting scipy
+  Using cached https://files.pythonhosted.org/packages/0c/d2/17323a97b33951ee8d74f0f416e5b446dc5f57cb2de659ee09e72e7f4b55/scipy-1.7.1-cp37-cp37m-win_amd64.whl
+Requirement already satisfied: numpy<1.23.0,>=1.16.5 in c:\program files\blender foundation\blender 2.83\2.83\python\lib\site-packages (from scipy) (1.17.0)
+Installing collected packages: scipy
+Successfully installed scipy-1.7.1
+0
