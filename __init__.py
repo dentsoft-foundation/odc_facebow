@@ -412,7 +412,7 @@ class aruco_tracker():
                 imgGrey = cv2.cvtColor(img,cv2.COLOR_BGR2GRAY)
                 #imgBlur = cv2.GaussianBlur(imgGrey, (7, 7), cv2.BORDER_DEFAULT)
                 #imgPyrDown = cv2.pyrDown(imgGrey)
-
+                '''
                 #undistor frame image
                 h, w = imgGrey.shape[:2]
                 newcameramtx, roi = cv2.getOptimalNewCameraMatrix(bpy.types.Scene.cameraMatrix, bpy.types.Scene.distCoeffs, (w,h), 1, (w,h))
@@ -420,9 +420,9 @@ class aruco_tracker():
                 # crop the image
                 x, y, w, h = roi
                 imgGrey = imgGrey[y:y+h, x:x+w]
-
+                '''
                 # lists of ids and the corners beloning to each id
-                corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=newcameramtx, distCoeff=context.scene.distCoeffs)
+                corners, ids, rejected_img_points = aruco.detectMarkers(imgGrey, ARUCO_DICT, parameters=ARUCO_PARAMETERS, cameraMatrix=bpy.types.Scene.cameraMatrix, distCoeff=context.scene.distCoeffs)
                 cv2.aruco.drawDetectedMarkers(imgGrey,corners,ids)
                 #for one in rejected_img_points:
                 #    more_corners, more_ids, rej, recovered_ids = cv2.aruco.refineDetectedMarkers(imgPyrDown, board, corners, ids, one)
@@ -431,7 +431,7 @@ class aruco_tracker():
             
             if np.all(ids is not None):  # If there are markers found by detector
                 if  context.scene.use_pose_board is True:
-                    if ids is not None and len(ids) >= 2:
+                    if ids is not None and len(ids) >= 9:
                         for i in range(0, len(ids)):  # Iterate in markers
                             MarkersIdCornersDict[ids[i][0]] = (list(corners))[i]
 
@@ -1163,7 +1163,7 @@ class calc_cond_angle(bpy.types.Operator):
         print(condyle_vector)
         # Note: returns angle in radians
         def theta(v, w): return np.arccos(v.dot(w)/(np.linalg.norm(v)*np.linalg.norm(w)))
-        context.scene.condylar_angle = 90 - np.degrees(theta(plane_normal_vec, condyle_vector))
+        context.scene.condylar_angle = np.degrees(theta(plane_normal_vec, condyle_vector))
         print(context.scene.condylar_angle)
         
         return {"FINISHED"}
@@ -1396,7 +1396,7 @@ def register():
     bpy.types.Scene.live_cam = bpy.props.BoolProperty(name="Camera Stream", description="Use system default camera to tracking.", default=False)
     bpy.types.Scene.pt_record = bpy.props.StringProperty(name = "Record File", description = "Patient record containing aruco markers.", default = "")
     bpy.types.Scene.stereo_vision = False
-    bpy.types.Scene.leap_controller = True
+    bpy.types.Scene.leap_controller = False
     bpy.types.Scene.calibration_data = None
 
     bpy.types.Scene.frankfort_plane_enable = bpy.props.BoolProperty(name="", description="Enable the Frankfort Plane tracking.", default=False)
@@ -1498,7 +1498,7 @@ def register():
             dtype=np.float32,
         ),
     ]
-    '''
+    
     #30 degree board
     bpy.types.Scene.pose_board_local_co = [
         np.array(
@@ -1525,6 +1525,37 @@ def register():
                 [0.191769, -0.04125, -0.017127],
                 [0.61922, -0.04125, -0.03171],
                 [0.61922, 0.04125, -0.03171]
+            ],
+            dtype=np.float32,
+        ),
+    ]
+    '''
+    #45 degree board
+    bpy.types.Scene.pose_board_local_co = [
+        np.array(
+            [
+                [0.187648, 0.04125, 0.045133],
+                [0.187648, -0.04125, 0.045133],
+                [-0.05915, -0.04125, 0.019874],
+                [-0.05915, 0.04125, 0.019874]
+            ],
+            dtype=np.float32,
+        ),
+        np.array(
+            [
+                [-0.069352, 0.04125, 0.015294],
+                [-0.069352, -0.04125, 0.015294],
+                [0.069352, -0.04125, -0.015294],
+                [0.069352, 0.04125, -0.015294]
+            ],
+            dtype=np.float32,
+        ),
+        np.array(
+            [
+                [0.11694, 0.04125, -0.018959],
+                [0.11694, -0.04125, -0.018959],
+                [0.544391, -0.04125, -0.033542],
+                [0.544391, 0.04125, -0.033542]
             ],
             dtype=np.float32,
         ),
